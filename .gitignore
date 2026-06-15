@@ -2,7 +2,7 @@
 .venv/
 __pycache__/
 *.pyc
+docs/
 data/*.db
 storage/
 docs/*.md
-
