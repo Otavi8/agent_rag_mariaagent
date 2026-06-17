@@ -39,8 +39,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Maria RAG Agent CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("init-db", help="Create the SQLite schema.")
-    subparsers.add_parser("seed-db", help="Insert sample data into the SQLite database.")
+    subparsers.add_parser("init-db", help="Create the PostgreSQL schema.")
+    subparsers.add_parser("seed-db", help="Insert sample data into the PostgreSQL database.")
+    migrate_sqlite_parser = subparsers.add_parser(
+        "migrate-sqlite",
+        help="Import data from a legacy SQLite database into PostgreSQL.",
+    )
+    migrate_sqlite_parser.add_argument(
+        "--sqlite-path",
+        dest="sqlite_path",
+        default="data/maria_agent.db",
+        help="Path to the legacy SQLite database file.",
+    )
+    migrate_sqlite_parser.add_argument(
+        "--replace-existing",
+        dest="replace_existing",
+        action="store_true",
+        help="Replace existing PostgreSQL data before importing the SQLite content.",
+    )
     subparsers.add_parser("reindex", help="Rebuild the local vector database.")
     subparsers.add_parser("show-config", help="Print the loaded configuration.")
 
@@ -83,13 +99,26 @@ def build_parser() -> argparse.ArgumentParser:
 def handle_init_db() -> None:
     settings = get_settings()
     init_database(settings)
-    print(f"SQLite initialized at {settings.sqlite_path_abs}")
+    print(f"PostgreSQL schema initialized for database {settings.database_name}")
 
 
 def handle_seed_db() -> None:
     settings = get_settings()
     stats = seed_database(settings)
-    print(f"Seed data loaded into {settings.sqlite_path_abs}")
+    print(f"Seed data loaded into PostgreSQL database {settings.database_name}")
+    print(json.dumps(stats, ensure_ascii=True, indent=2))
+
+
+def handle_migrate_sqlite(sqlite_path: str, replace_existing: bool) -> None:
+    settings = get_settings()
+    from .migrations import migrate_sqlite_to_postgres
+
+    stats = migrate_sqlite_to_postgres(
+        settings,
+        sqlite_path=sqlite_path,
+        replace_existing=replace_existing,
+    )
+    print(f"SQLite data imported into PostgreSQL database {settings.database_name}")
     print(json.dumps(stats, ensure_ascii=True, indent=2))
 
 
@@ -114,10 +143,9 @@ def handle_ask(
 ) -> None:
     settings = get_settings()
     from .agent import ask_agent
-    from .vectorstore import reindex_vector_store, vector_store_is_ready
+    from .vectorstore import ensure_vector_store_ready
 
-    if settings.auto_reindex_on_empty_index and not vector_store_is_ready(settings):
-        reindex_vector_store(settings)
+    ensure_vector_store_ready(settings)
 
     reply = ask_agent(
         question=question,
@@ -200,6 +228,13 @@ def main() -> None:
 
     if args.command == "seed-db":
         raise SystemExit(run_user_safe(handle_seed_db))
+
+    if args.command == "migrate-sqlite":
+        raise SystemExit(
+            run_user_safe(
+                lambda: handle_migrate_sqlite(args.sqlite_path, args.replace_existing)
+            )
+        )
 
     if args.command == "reindex":
         raise SystemExit(run_user_safe(handle_reindex))

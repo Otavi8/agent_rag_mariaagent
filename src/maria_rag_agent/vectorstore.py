@@ -81,6 +81,11 @@ def vector_store_is_ready(settings: Settings) -> bool:
     return target.exists() and any(target.iterdir())
 
 
+def ensure_vector_store_ready(settings: Settings) -> None:
+    if settings.auto_reindex_on_empty_index and not vector_store_is_ready(settings):
+        reindex_vector_store(settings)
+
+
 def reindex_vector_store(settings: Settings) -> dict[str, int]:
     init_database(settings)
     rows_by_table = fetch_rows_for_indexing(settings)

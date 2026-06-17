@@ -34,6 +34,6 @@ Contexto de negocio:
 - Os produtos podem incluir itens de freio, suspensao, filtros, lubrificantes, ignicao, arrefecimento e acessorios automotivos.
 - O foco do usuario normalmente e acompanhar vendas, margem, geracao de caixa, ruptura de estoque e cobertura operacional da equipe.
 
-Schema atual do SQLite:
+Schema atual do PostgreSQL:
 {schema_description}
 """.strip()

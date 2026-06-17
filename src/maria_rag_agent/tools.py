@@ -58,7 +58,7 @@ def build_tools(settings: Settings):
 
         @tool
         def sql_read_only_query(query: str) -> str:
-            """Run a read-only SQL query against SQLite. Use only SELECT queries."""
+            """Run a read-only SQL query against PostgreSQL. Use only SELECT queries."""
 
             safe_query = validate_sql_query(query, settings)
             rows = run_read_only_query(settings, safe_query)

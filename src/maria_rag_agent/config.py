@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -21,7 +22,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     quiet_mode: bool = True
 
-    sqlite_path: Path = Field(default=Path("./data/maria_agent.db"))
+    database_url: str = "postgresql://postgres:password@postgres:5432/maria_agent"
     vector_db_dir: Path = Field(default=Path("./storage/chroma"))
     vector_collection_name: str = "maria_rag_collection"
 
@@ -61,6 +62,9 @@ class Settings(BaseSettings):
     mask_phones: bool = True
     mask_cpfs: bool = True
 
+    api_host: str = "0.0.0.0"
+    api_port: int = 8000
+
     llm_provider: str = "openai"
     llm_model: str = "gpt-4.1-mini"
     llm_temperature: float = 0.0
@@ -73,6 +77,27 @@ class Settings(BaseSettings):
     embedding_normalize: bool = True
 
     ollama_base_url: str = "http://localhost:11434"
+
+    evolution_enabled: bool = True
+    evolution_base_url: str = "http://evolution-go:8080"
+    evolution_api_key: str | None = None
+    evolution_internal_webhook_url: str = "http://app:8000/webhooks/evolution"
+    evolution_instance_name: str = "maria-whatsapp"
+    evolution_instance_id: str | None = None
+    evolution_subscribe_events: str = "MESSAGE,CONNECTION,QRCODE"
+    evolution_webhook_secret: str | None = None
+    evolution_public_webhook_url: str | None = None
+    evolution_default_store_id: str | None = None
+    evolution_ignore_group_messages: bool = True
+    evolution_ignore_newsletter_messages: bool = True
+    evolution_reply_to_media_without_text: bool = False
+
+    traefik_enabled: bool = True
+    traefik_domain: str = "example.com"
+    traefik_app_host: str = "maria.example.com"
+    traefik_evolution_host: str = "evolution.example.com"
+    traefik_acme_email: str = "admin@example.com"
+    traefik_basic_auth_users: str | None = None
 
     @field_validator("chunk_size")
     @classmethod
@@ -96,16 +121,13 @@ class Settings(BaseSettings):
         "memory_summarize_after_messages",
         "memory_summary_max_chars",
         "user_memory_top_k",
+        "api_port",
     )
     @classmethod
     def validate_positive_memory_values(cls, value: int) -> int:
         if value < 1:
-            raise ValueError("Memory-related integer values must be >= 1.")
+            raise ValueError("Configured positive integer values must be >= 1.")
         return value
-
-    @property
-    def sqlite_path_abs(self) -> Path:
-        return (PROJECT_ROOT / self.sqlite_path).resolve() if not self.sqlite_path.is_absolute() else self.sqlite_path
 
     @property
     def vector_db_dir_abs(self) -> Path:
@@ -119,14 +141,30 @@ class Settings(BaseSettings):
     def blocked_patterns(self) -> list[str]:
         return [item.strip() for item in self.blocked_input_patterns.split("||") if item.strip()]
 
+    @property
+    def evolution_subscribe_event_list(self) -> list[str]:
+        return [item.strip() for item in self.evolution_subscribe_events.split(",") if item.strip()]
+
+    @property
+    def database_name(self) -> str:
+        path = urlsplit(self.database_url).path.lstrip("/")
+        return path or "postgres"
+
     def as_public_dict(self) -> dict[str, object]:
         data = self.model_dump()
         if data.get("openai_api_key"):
             data["openai_api_key"] = "***"
-        data["sqlite_path"] = str(self.sqlite_path_abs)
+        if data.get("evolution_api_key"):
+            data["evolution_api_key"] = "***"
+        if data.get("evolution_webhook_secret"):
+            data["evolution_webhook_secret"] = "***"
+        if data.get("database_url"):
+            data["database_url"] = "***"
         data["vector_db_dir"] = str(self.vector_db_dir_abs)
         data["source_table_list"] = self.source_table_list
         data["blocked_patterns"] = self.blocked_patterns
+        data["evolution_subscribe_event_list"] = self.evolution_subscribe_event_list
+        data["database_name"] = self.database_name
         return data
 
 

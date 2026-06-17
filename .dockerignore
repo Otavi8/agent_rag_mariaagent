@@ -1,0 +1,13 @@
+.git
+.gitignore
+.venv
+.vscode
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.db-shm
+*.db-wal
+storage/chroma
+data/*.db
+docs/

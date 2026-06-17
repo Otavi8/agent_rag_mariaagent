@@ -1,0 +1,131 @@
+services:
+  traefik:
+    image: traefik:v3.1
+    command:
+      - --api.dashboard=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=proxy
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_ACME_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge=true
+      - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+      - --accesslog=true
+      - --log.level=INFO
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+    networks:
+      - proxy
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.middlewares.platform-auth.basicauth.users=${TRAEFIK_BASIC_AUTH_USERS}
+      - traefik.http.routers.traefik.rule=Host(`${TRAEFIK_DASHBOARD_HOST}`)
+      - traefik.http.routers.traefik.entrypoints=websecure
+      - traefik.http.routers.traefik.tls=true
+      - traefik.http.routers.traefik.tls.certresolver=letsencrypt
+      - traefik.http.routers.traefik.service=api@internal
+      - traefik.http.routers.traefik.middlewares=platform-auth@docker
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-password}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  app:
+    build:
+      context: .
+    env_file:
+      - .env
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:change-this-password@postgres:5432/maria_agent}
+      EVOLUTION_ENABLED: "true"
+      EVOLUTION_BASE_URL: http://evolution-go:8080
+      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-change-this-key}
+      EVOLUTION_INTERNAL_WEBHOOK_URL: http://app:8000/webhooks/evolution
+      EVOLUTION_PUBLIC_WEBHOOK_URL: ${EVOLUTION_PUBLIC_WEBHOOK_URL:-}
+      EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-maria-whatsapp}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      evolution-go:
+        condition: service_started
+    volumes:
+      - ./data:/app/data
+      - ./storage:/app/storage
+    networks:
+      - backend
+      - proxy
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.maria.rule=Host(`${TRAEFIK_APP_HOST}`)
+      - traefik.http.routers.maria.entrypoints=websecure
+      - traefik.http.routers.maria.tls=true
+      - traefik.http.routers.maria.tls.certresolver=letsencrypt
+      - traefik.http.routers.maria.middlewares=platform-auth@docker
+      - traefik.http.services.maria.loadbalancer.server.port=8000
+
+  evolution-go:
+    image: evoapicloud/evolution-go:latest
+    environment:
+      SERVER_PORT: 8080
+      CLIENT_NAME: evolution
+      GLOBAL_API_KEY: ${EVOLUTION_API_KEY:-change-this-key}
+      POSTGRES_AUTH_DB: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-change-this-password}@postgres:5432/evogo_auth?sslmode=disable
+      POSTGRES_USERS_DB: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-change-this-password}@postgres:5432/evogo_users?sslmode=disable
+      DATABASE_SAVE_MESSAGES: "false"
+      WADEBUG: INFO
+      LOGTYPE: console
+      WEBHOOK_URL: ${EVOLUTION_INTERNAL_WEBHOOK_URL:-http://app:8000/webhooks/evolution}
+      WEBHOOK_FILES: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+      - proxy
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.evolution.rule=Host(`${TRAEFIK_EVOLUTION_HOST}`)
+      - traefik.http.routers.evolution.entrypoints=websecure
+      - traefik.http.routers.evolution.tls=true
+      - traefik.http.routers.evolution.tls.certresolver=letsencrypt
+      - traefik.http.routers.evolution.middlewares=platform-auth@docker
+      - traefik.http.services.evolution.loadbalancer.server.port=8080
+
+networks:
+  proxy:
+    driver: bridge
+  backend:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  traefik_letsencrypt:

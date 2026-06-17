@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import sqlite3
+from typing import Any
 
 from langchain_core.documents import Document
 
@@ -13,7 +13,7 @@ def translate_employee_status(status: str) -> str:
     return mapping.get(status.lower(), status)
 
 
-def render_row(table_name: str, row: sqlite3.Row) -> str:
+def render_row(table_name: str, row: dict[str, Any]) -> str:
     if table_name == "product_catalog":
         return (
             "Tipo de documento: cadastro de produto\n"
@@ -83,7 +83,7 @@ def render_row(table_name: str, row: sqlite3.Row) -> str:
     return "\n".join(lines)
 
 
-def build_documents(rows_by_table: dict[str, list[sqlite3.Row]]) -> list[Document]:
+def build_documents(rows_by_table: dict[str, list[dict[str, Any]]]) -> list[Document]:
     documents: list[Document] = []
     for table_name, rows in rows_by_table.items():
         for row in rows:

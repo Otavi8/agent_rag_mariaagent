@@ -1,67 +1,67 @@
 # Maria RAG Agent
 
-Base profissional de estudo para uma assistente de loja chamada Maria, focada em gerentes de uma franquia de autopecas, com:
+Assistente de estudo com arquitetura pronta para producao leve, pensada para responder perguntas operacionais sobre uma loja de autopecas por CLI, API HTTP e WhatsApp.
 
-- `SQLite` como fonte de verdade
+## O que este projeto entrega
+
+- `PostgreSQL` como banco transacional principal
 - `Chroma` como banco vetorial local
-- `LangChain` para agent, tools e pipeline RAG
-- `.env` para controlar chunking, retrieval, SQL guardrails e parametros do agent
+- `LangChain` para orquestracao do agent e das tools
+- `FastAPI` para API e webhook
+- `Evolution Go` para integracao com WhatsApp
+- `Traefik` para borda HTTP/HTTPS no deploy com Docker
+- memoria conversacional persistente por usuario e conversa
 
-## Arquitetura
+## Arquitetura em uma frase
 
-O projeto foi pensado para o fluxo mais solido para RAG em dados de banco:
+Os dados operacionais ficam no `PostgreSQL`, sao indexados no `Chroma`, e a Maria responde usando um modelo hibrido que combina busca vetorial com consulta SQL somente leitura.
 
-1. O `SQLite` guarda os dados originais.
-2. O pipeline de indexacao le tabelas configuradas.
-3. Cada linha vira um `Document`.
-4. Os documentos sao quebrados em chunks e vetorizados.
-5. O agent usa duas ferramentas:
-   - `semantic_search`: busca semantica no Chroma
-   - `sql_read_only_query`: consulta SQL somente leitura para dados exatos
+## Fluxo principal
 
-Isso te da um agent hibrido:
+1. O `PostgreSQL` guarda os dados da operacao.
+2. O pipeline transforma linhas das tabelas em `Document`.
+3. Os documentos sao quebrados em chunks e vetorizados no `Chroma`.
+4. O agent decide entre `semantic_search` para contexto semantico e `sql_read_only_query` para dados exatos.
+5. A resposta pode sair por CLI, API HTTP ou WhatsApp.
+6. No WhatsApp, o `Evolution Go` recebe a mensagem e chama o webhook da Maria.
+7. No deploy, o `Traefik` publica a stack com TLS e roteamento por host.
 
-- perguntas conceituais -> RAG vetorial
-- perguntas exatas, numericas, datas e status -> SQL
+## Casos de uso
 
-## Memoria conversacional
+- responder perguntas sobre vendas, estoque e cobertura de equipe
+- manter contexto entre conversas sem reenviar todo o historico
+- expor o agent por API para outras integracoes
+- operar um fluxo de atendimento por WhatsApp com uma stack unica em Docker
 
-O projeto agora suporta memoria persistente para multiplos usuarios com:
-
-- `conversation_id` para continuar uma conversa
-- `user_id` para isolar memorias por usuario
-- resumo automatico da conversa para reduzir tokens
-- memorias duraveis opcionais por usuario e loja
-
-Na pratica, a Maria usa:
-
-- resumo do historico antigo
-- ultimas mensagens da conversa
-- memorias relevantes do usuario
-- dados atuais do banco e do RAG
-
-Assim, voce evita reenviar o historico inteiro em toda chamada.
-
-## Estrutura
+## Estrutura principal
 
 ```text
 src/maria_rag_agent/
   agent.py
+  api.py
   cli.py
   config.py
   database.py
   documents.py
+  evolution.py
   guardrails.py
+  memory.py
+  migrations.py
   prompts.py
   tools.py
   vectorstore.py
+docker/
 data/
 storage/
+Dockerfile
+docker-compose.yml
+.env.example
+PRD.md
 ```
 
-## Como rodar
+## Comeco rapido local
 
-### 1. Criar ambiente e instalar dependencias
+### 1. Instalar dependencias
 
 ```powershell
 python -m venv .venv
@@ -69,22 +69,11 @@ python -m venv .venv
 pip install -e .
 ```
 
-Se preferir instalar apenas as dependencias principais, sem modo editavel:
-
-```powershell
-pip install -r requirements.txt
-```
-
-Se quiser usar `Ollama`, instale tambem:
+Opcional com `Ollama`:
 
 ```powershell
 pip install -e .[ollama]
 ```
-
-Quando usar cada opcao:
-
-- `pip install -e .`: melhor durante desenvolvimento, porque o projeto fica instalado em modo editavel e qualquer alteracao no codigo ja e refletida sem reinstalar.
-- `pip install -r requirements.txt`: melhor quando voce quer apenas rodar o ambiente com as dependencias principais, sem instalar o pacote em modo editavel.
 
 ### 2. Criar o `.env`
 
@@ -92,7 +81,7 @@ Quando usar cada opcao:
 Copy-Item .env.example .env
 ```
 
-Preencha pelo menos a parte do modelo. Exemplo com OpenAI:
+Campos minimos para OpenAI:
 
 ```env
 LLM_PROVIDER=openai
@@ -100,99 +89,179 @@ LLM_MODEL=gpt-4.1-mini
 OPENAI_API_KEY=sua-chave
 ```
 
-Exemplo local com Ollama:
+Campos minimos para banco:
 
 ```env
-LLM_PROVIDER=ollama
-LLM_MODEL=llama3.1
-OLLAMA_BASE_URL=http://localhost:11434
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=change-this-password
+DATABASE_URL=postgresql://postgres:change-this-password@localhost:5432/maria_agent
 ```
 
-## Comandos
+### 3. Inicializar o banco
 
-Inicializar o banco local:
+```powershell
+python -m maria_rag_agent.cli init-db
+python -m maria_rag_agent.cli seed-db
+python -m maria_rag_agent.cli reindex
+```
+
+### 4. Fazer a primeira pergunta
+
+```powershell
+python -m maria_rag_agent.cli ask "Quais produtos estao abaixo do ponto de reposicao?"
+```
+
+## Comandos principais
+
+Criar schema:
 
 ```powershell
 python -m maria_rag_agent.cli init-db
 ```
 
-Popular com dados de exemplo:
+Popular dados de exemplo:
 
 ```powershell
 python -m maria_rag_agent.cli seed-db
 ```
 
-Reindexar no banco vetorial:
+Migrar banco legado `SQLite` para `PostgreSQL`:
+
+```powershell
+python -m maria_rag_agent.cli migrate-sqlite --sqlite-path data/maria_agent.db
+```
+
+Sobrescrever dados existentes no `PostgreSQL`:
+
+```powershell
+python -m maria_rag_agent.cli migrate-sqlite --sqlite-path data/maria_agent.db --replace-existing
+```
+
+Reindexar o banco vetorial:
 
 ```powershell
 python -m maria_rag_agent.cli reindex
 ```
 
-Fazer uma pergunta ao agent:
+Perguntar ao agent:
 
 ```powershell
-python -m maria_rag_agent.cli ask "Quais produtos mais geraram caixa nesta semana?"
+python -m maria_rag_agent.cli ask "Quais categorias mais geraram caixa nesta semana?"
 ```
 
-Continuar uma conversa existente:
+Continuar uma conversa:
 
 ```powershell
-python -m maria_rag_agent.cli ask "E quais setores podem cobrir uma ausencia no vendas_balcao?" --conversation-id conv_demo_01 --user-id gerente_loja_01 --store-id loja_centro
+python -m maria_rag_agent.cli ask "Quem pode cobrir o vendas_balcao?" --conversation-id conv_demo_01 --user-id gerente_loja_01 --store-id loja_centro
 ```
 
-Listar conversas salvas:
+Listar conversas:
 
 ```powershell
 python -m maria_rag_agent.cli list-conversations --user-id gerente_loja_01
 ```
 
-Ver mensagens recentes de uma conversa:
-
-```powershell
-python -m maria_rag_agent.cli show-conversation conv_demo_01
-```
-
-Salvar uma memoria duravel do usuario:
-
-```powershell
-python -m maria_rag_agent.cli add-user-memory gerente_loja_01 "Prefere respostas curtas com foco em acao e indicadores." --memory-type preference --store-id loja_centro --priority 3
-```
-
-Listar memorias duraveis do usuario:
+Listar memorias do usuario:
 
 ```powershell
 python -m maria_rag_agent.cli list-user-memories gerente_loja_01 --store-id loja_centro
 ```
 
-Ver a configuracao carregada:
+Subir a API local:
 
 ```powershell
-python -m maria_rag_agent.cli show-config
+python -m maria_rag_agent.api
 ```
 
-## Parametros importantes no `.env`
+## Endpoints principais
 
-Chunking:
+Health check:
 
+```bash
+curl http://localhost:8000/health
+```
+
+Pergunta via HTTP:
+
+```bash
+curl -X POST http://localhost:8000/api/ask \
+  -H "Content-Type: application/json" \
+  -d "{\"question\":\"Quais produtos estao abaixo do ponto de reposicao?\",\"user_id\":\"teste-http\"}"
+```
+
+Criar instancia do WhatsApp:
+
+```bash
+curl -X POST http://localhost:8000/api/evolution/instances/create \
+  -H "Content-Type: application/json" \
+  -d "{\"instance_name\":\"maria-whatsapp\"}"
+```
+
+Conectar instancia:
+
+```bash
+curl -X POST http://localhost:8000/api/evolution/instances/connect \
+  -H "Content-Type: application/json" \
+  -d "{\"subscribe\":[\"MESSAGE\",\"CONNECTION\",\"QRCODE\"],\"immediate\":true}"
+```
+
+## Docker e VPS
+
+O projeto inclui uma stack unica em [docker-compose.yml](docker-compose.yml) com:
+
+- `traefik`
+- `postgres`
+- `app`
+- `evolution-go`
+
+Subir toda a stack:
+
+```bash
+docker compose up -d --build
+```
+
+Ver logs:
+
+```bash
+docker compose logs -f traefik
+docker compose logs -f app
+docker compose logs -f evolution-go
+docker compose logs -f postgres
+```
+
+Parar a stack:
+
+```bash
+docker compose down
+```
+
+Migrar o `SQLite` legado ja dentro da stack:
+
+```bash
+docker compose exec app python -m maria_rag_agent.cli migrate-sqlite --sqlite-path /app/data/maria_agent.db --replace-existing
+docker compose exec app python -m maria_rag_agent.cli reindex
+```
+
+Esse fluxo funciona porque `./data` e montado em `/app/data` no container da app.
+
+## Variaveis mais importantes
+
+Banco e API:
+
+- `DATABASE_URL`
+- `POSTGRES_USER`
+- `POSTGRES_PASSWORD`
+- `API_HOST`
+- `API_PORT`
+
+RAG:
+
+- `SOURCE_TABLES`
 - `CHUNK_SIZE`
 - `CHUNK_OVERLAP`
-
-Busca:
-
 - `SEARCH_K`
 - `SEARCH_FETCH_K`
 - `MAX_CONTEXT_CHARS`
-- `MIN_RETRIEVED_DOCUMENTS`
-
-Guardrails:
-
-- `BLOCKED_INPUT_PATTERNS`
-- `ALLOW_ONLY_SELECT_SQL`
-- `SQL_MAX_ROWS`
-- `MASK_EMAILS`
-- `MASK_PHONES`
-- `MASK_CPFS`
-- `MAX_TOOL_CALLS`
 
 Memoria:
 
@@ -200,30 +269,47 @@ Memoria:
 - `ENABLE_USER_MEMORY`
 - `MEMORY_RECENT_MESSAGES`
 - `MEMORY_SUMMARIZE_AFTER_MESSAGES`
-- `MEMORY_SUMMARY_MAX_CHARS`
 - `USER_MEMORY_TOP_K`
 
-## Tabelas criadas
+WhatsApp:
 
-O projeto cria quatro tabelas principais para o contexto de autopecas:
+- `EVOLUTION_ENABLED`
+- `EVOLUTION_BASE_URL`
+- `EVOLUTION_API_KEY`
+- `EVOLUTION_INSTANCE_NAME`
+- `EVOLUTION_SUBSCRIBE_EVENTS`
+- `EVOLUTION_WEBHOOK_SECRET`
 
-- `product_catalog`: cadastro de produtos com `sku`, descricao, categoria, estoque e precificacao
-- `sales`: vendas por item com `sku`, descricao, preco bruto, receita e geracao de caixa
-- `employees`: cadastro de funcionarios sem dado sensivel, com `id_colaborador`, setor e status
-- `absenteeism_events`: historico de ausencias para apoiar remanejamento de equipes
+Traefik:
 
-## Exemplos de perguntas
+- `TRAEFIK_ACME_EMAIL`
+- `TRAEFIK_DASHBOARD_HOST`
+- `TRAEFIK_APP_HOST`
+- `TRAEFIK_EVOLUTION_HOST`
+- `TRAEFIK_BASIC_AUTH_USERS`
 
-- `Quais categorias mais geraram caixa entre 2026-06-09 e 2026-06-15?`
-- `Quais produtos estao abaixo do ponto de reposicao?`
-- `Quem do time ativo pode cobrir o setor de vendas_balcao no turno da manha?`
-- `Quais faltas recentes exigiram substituicao imediata?`
-- `Liste os funcionarios ativos da televendas e seus setores de apoio.`
+Veja os defaults em [.env.example](.env.example).
 
-## Proximos passos naturais
+## Como replicar para outro negocio
 
-- trocar os seeds por dados reais da sua operacao
-- ajustar os renderizadores em `documents.py` para a sua nomenclatura interna
-- adicionar avaliacao automatica de respostas
-- incluir filtros por metadata no retriever
-- conectar LangSmith para tracing
+1. Troque o schema e os seeds em `database.py`.
+2. Ajuste os renderizadores em `documents.py`.
+3. Reescreva o prompt do agent em `prompts.py`.
+4. Atualize `SOURCE_TABLES` e os exemplos do `.env`.
+5. Rode `init-db`, `seed-db` ou `migrate-sqlite`, e depois `reindex`.
+6. Teste por CLI antes de expor por API ou WhatsApp.
+
+## Arquivos de referencia
+
+- [PRD.md](PRD.md): documento para replicacao do modelo por outros times
+- [.env.example](.env.example): configuracao base
+- [docker-compose.yml](docker-compose.yml): stack unica da VPS
+- [Dockerfile](Dockerfile): imagem da aplicacao
+
+## Observacoes importantes
+
+- o dominio atual de exemplo e autopecas, mas a arquitetura e generica
+- o banco principal nao e mais `SQLite`; agora e `PostgreSQL`
+- o `Chroma` continua local em `./storage`
+- a chave real da OpenAI nunca deve ser commitada
+- antes de publicar, revise `.env`, dominios, credenciais e hashes de `basic auth`
