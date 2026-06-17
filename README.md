@@ -302,6 +302,7 @@ Veja os defaults em [.env.example](.env.example).
 ## Arquivos de referencia
 
 - [PRD.md](PRD.md): documento para replicacao do modelo por outros times
+- [INSTALL.md](INSTALL.md): roteiro de instalacao em VPS Linux crua
 - [.env.example](.env.example): configuracao base
 - [docker-compose.yml](docker-compose.yml): stack unica da VPS
 - [Dockerfile](Dockerfile): imagem da aplicacao
