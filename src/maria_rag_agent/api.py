@@ -95,6 +95,27 @@ def _resolve_instance_name(settings: Settings, instance_id: str | None = None) -
     return settings.evolution_instance_name
 
 
+def _resolve_instance_send_credentials(
+    settings: Settings,
+    instance_id: str | None = None,
+    instance_name: str | None = None,
+) -> tuple[str, str | None, str | None]:
+    row = None
+    if instance_id:
+        row = fetch_evolution_instance_state(settings, instance_id)
+    elif instance_name:
+        row = fetch_evolution_instance_state_by_name(settings, instance_name)
+
+    resolved_name = (
+        str(row["instance_name"])
+        if row and row.get("instance_name")
+        else (instance_name or settings.evolution_instance_name)
+    )
+    resolved_id = str(row["instance_id"]) if row and row.get("instance_id") else instance_id
+    instance_token = str(row["instance_token"]) if row and row.get("instance_token") else None
+    return resolved_name, resolved_id, instance_token
+
+
 def _resolve_instance_id(settings: Settings, explicit_instance_id: str | None = None) -> str:
     if explicit_instance_id:
         return explicit_instance_id
@@ -285,10 +306,16 @@ def evolution_send_test_message(request: EvolutionSendTextRequest) -> dict[str, 
     settings = _settings()
     if not settings.evolution_enabled:
         raise HTTPException(status_code=400, detail="Evolution Go integration is disabled.")
+    instance_name, instance_id, instance_token = _resolve_instance_send_credentials(
+        settings=settings,
+        instance_name=request.instance_name,
+    )
     return EvolutionGoClient(settings).send_text(
         number=request.number,
         text=request.text,
-        instance_name=request.instance_name,
+        instance_name=instance_name,
+        instance_id=instance_id,
+        api_key_override=instance_token,
     )
 
 
@@ -351,10 +378,16 @@ def evolution_webhook(
         if not settings.evolution_reply_to_media_without_text:
             return {"received": True, "ignored": "no_text"}
         fallback_text = _build_media_fallback_text(data)
+        instance_name, resolved_instance_id, instance_token = _resolve_instance_send_credentials(
+            settings=settings,
+            instance_id=str(instance_id),
+        )
         EvolutionGoClient(settings).send_text(
             number=sender_number,
             text=fallback_text,
-            instance_name=_resolve_instance_name(settings, str(instance_id)),
+            instance_name=instance_name,
+            instance_id=resolved_instance_id,
+            api_key_override=instance_token,
         )
         return {
             "received": True,
@@ -380,10 +413,16 @@ def evolution_webhook(
         reply_text = str(exc)
         conversation_id = None
 
+    instance_name, resolved_instance_id, instance_token = _resolve_instance_send_credentials(
+        settings=settings,
+        instance_id=str(instance_id),
+    )
     EvolutionGoClient(settings).send_text(
         number=sender_number,
         text=reply_text,
-        instance_name=_resolve_instance_name(settings, str(instance_id)),
+        instance_name=instance_name,
+        instance_id=resolved_instance_id,
+        api_key_override=instance_token,
     )
 
     return {

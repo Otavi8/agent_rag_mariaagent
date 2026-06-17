@@ -66,12 +66,17 @@ class EvolutionGoClient:
         self.settings = settings
         self.base_url = settings.evolution_base_url.rstrip("/")
 
-    def _headers(self, instance_id: str | None = None) -> dict[str, str]:
-        if not self.settings.evolution_api_key:
+    def _headers(
+        self,
+        instance_id: str | None = None,
+        api_key_override: str | None = None,
+    ) -> dict[str, str]:
+        api_key = api_key_override or self.settings.evolution_api_key
+        if not api_key:
             raise RuntimeError("EVOLUTION_API_KEY is required to call Evolution Go.")
 
         headers = {
-            "apikey": self.settings.evolution_api_key,
+            "apikey": api_key,
             "Content-Type": "application/json",
         }
         if instance_id:
@@ -137,19 +142,36 @@ class EvolutionGoClient:
         number: str,
         text: str,
         instance_name: str | None = None,
+        instance_id: str | None = None,
+        api_key_override: str | None = None,
         delay: int = 0,
     ) -> dict[str, Any]:
         resolved_instance_name = instance_name or self.settings.evolution_instance_name
-        payload = {
+        modern_payload = {
+            "number": number,
+            "text": text,
+            "delay": delay,
+        }
+        legacy_payload = {
             "number": number,
             "textMessage": {"text": text},
             "delay": delay,
         }
         with httpx.Client(timeout=30.0) as client:
             response = client.post(
-                f"{self.base_url}/message/sendText/{resolved_instance_name}",
-                headers=self._headers(),
-                json=payload,
+                f"{self.base_url}/send/text",
+                headers=self._headers(instance_id=instance_id, api_key_override=api_key_override),
+                json=modern_payload,
             )
-            response.raise_for_status()
-            return response.json()
+            if response.status_code != 404:
+                response.raise_for_status()
+                return response.json()
+
+            # Fallback for older Evolution deployments that still expose the legacy route.
+            legacy_response = client.post(
+                f"{self.base_url}/message/sendText/{resolved_instance_name}",
+                headers=self._headers(api_key_override=api_key_override),
+                json=legacy_payload,
+            )
+            legacy_response.raise_for_status()
+            return legacy_response.json()
