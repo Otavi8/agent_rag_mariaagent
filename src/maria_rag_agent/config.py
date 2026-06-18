@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     evolution_ignore_group_messages: bool = True
     evolution_ignore_newsletter_messages: bool = True
     evolution_reply_to_media_without_text: bool = False
+    evolution_unauthorized_number_message: str = (
+        "Seu numero nao esta autorizado para usar este atendimento. "
+        "Fale com o responsavel pela operacao para solicitar liberacao."
+    )
 
     traefik_enabled: bool = True
     traefik_domain: str = "example.com"

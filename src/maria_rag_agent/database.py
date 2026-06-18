@@ -182,6 +182,37 @@ def init_database(settings: Settings) -> None:
                 """
             )
             cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS whatsapp_allowed_contacts (
+                    id SERIAL PRIMARY KEY,
+                    user_name TEXT NOT NULL,
+                    phone_number TEXT NOT NULL UNIQUE,
+                    notes TEXT,
+                    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_at TIMESTAMPTZ
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS whatsapp_blocked_contacts (
+                    id SERIAL PRIMARY KEY,
+                    phone_number TEXT NOT NULL UNIQUE,
+                    push_name TEXT,
+                    block_reason TEXT NOT NULL,
+                    first_message_text TEXT,
+                    last_message_text TEXT,
+                    reply_sent BOOLEAN NOT NULL DEFAULT FALSE,
+                    last_instance_id TEXT,
+                    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+                    last_seen_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_product_catalog_sku ON product_catalog(sku)"
             )
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sales_sale_date ON sales(sale_date)")
@@ -203,6 +234,12 @@ def init_database(settings: Settings) -> None:
             )
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_evolution_instance_state_name ON evolution_instance_state(instance_name)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_whatsapp_allowed_contacts_active ON whatsapp_allowed_contacts(is_active, user_name)"
+            )
+            cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_whatsapp_blocked_contacts_updated_at ON whatsapp_blocked_contacts(updated_at DESC)"
             )
         connection.commit()
 
@@ -832,3 +869,318 @@ def register_processed_evolution_message(
             row = cursor.fetchone()
         connection.commit()
     return row is not None
+
+
+def upsert_whatsapp_allowed_contact(
+    settings: Settings,
+    user_name: str,
+    phone_number: str,
+    notes: str | None = None,
+    is_active: bool = True,
+) -> DbRow:
+    init_database(settings)
+    with postgres_connection(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO whatsapp_allowed_contacts (user_name, phone_number, notes, is_active)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (phone_number) DO UPDATE SET
+                    user_name = EXCLUDED.user_name,
+                    notes = EXCLUDED.notes,
+                    is_active = EXCLUDED.is_active,
+                    updated_at = CURRENT_TIMESTAMP
+                RETURNING
+                    id,
+                    user_name,
+                    phone_number,
+                    notes,
+                    is_active,
+                    created_at,
+                    updated_at,
+                    last_seen_at
+                """,
+                (user_name, phone_number, notes, is_active),
+            )
+            row = cursor.fetchone()
+        connection.commit()
+    return row
+
+
+def set_whatsapp_allowed_contact_active(
+    settings: Settings,
+    phone_number: str,
+    is_active: bool,
+) -> DbRow | None:
+    init_database(settings)
+    with postgres_connection(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE whatsapp_allowed_contacts
+                SET
+                    is_active = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE phone_number = %s
+                RETURNING
+                    id,
+                    user_name,
+                    phone_number,
+                    notes,
+                    is_active,
+                    created_at,
+                    updated_at,
+                    last_seen_at
+                """,
+                (is_active, phone_number),
+            )
+            row = cursor.fetchone()
+        connection.commit()
+    return row
+
+
+def fetch_whatsapp_allowed_contact(settings: Settings, phone_number: str) -> DbRow | None:
+    init_database(settings)
+    with postgres_connection(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    user_name,
+                    phone_number,
+                    notes,
+                    is_active,
+                    created_at,
+                    updated_at,
+                    last_seen_at
+                FROM whatsapp_allowed_contacts
+                WHERE phone_number = %s
+                """,
+                (phone_number,),
+            )
+            row = cursor.fetchone()
+    return row
+
+
+def list_whatsapp_allowed_contacts(
+    settings: Settings,
+    active_only: bool = True,
+) -> list[DbRow]:
+    init_database(settings)
+    query = """
+        SELECT
+            id,
+            user_name,
+            phone_number,
+            notes,
+            is_active,
+            created_at,
+            updated_at,
+            last_seen_at
+        FROM whatsapp_allowed_contacts
+    """
+    parameters: list[object] = []
+    if active_only:
+        query += " WHERE is_active = TRUE"
+    query += " ORDER BY user_name ASC, phone_number ASC"
+    with postgres_connection(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(query, parameters)
+            rows = cursor.fetchall()
+    return rows
+
+
+def count_active_whatsapp_allowed_contacts(settings: Settings) -> int:
+    init_database(settings)
+    with postgres_connection(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM whatsapp_allowed_contacts
+                WHERE is_active = TRUE
+                """
+            )
+            row = cursor.fetchone()
+    return int(row["total"])
+
+
+def touch_whatsapp_allowed_contact_seen(settings: Settings, phone_number: str) -> None:
+    init_database(settings)
+    with postgres_connection(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE whatsapp_allowed_contacts
+                SET
+                    last_seen_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE phone_number = %s
+                """,
+                (phone_number,),
+            )
+        connection.commit()
+
+
+def fetch_whatsapp_blocked_contact(settings: Settings, phone_number: str) -> DbRow | None:
+    init_database(settings)
+    with postgres_connection(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    phone_number,
+                    push_name,
+                    block_reason,
+                    first_message_text,
+                    last_message_text,
+                    reply_sent,
+                    last_instance_id,
+                    created_at,
+                    updated_at,
+                    last_seen_at
+                FROM whatsapp_blocked_contacts
+                WHERE phone_number = %s
+                """,
+                (phone_number,),
+            )
+            row = cursor.fetchone()
+    return row
+
+
+def upsert_whatsapp_blocked_contact(
+    settings: Settings,
+    phone_number: str,
+    block_reason: str,
+    push_name: str | None = None,
+    message_text: str | None = None,
+    instance_id: str | None = None,
+) -> tuple[DbRow, bool]:
+    init_database(settings)
+    existing = fetch_whatsapp_blocked_contact(settings, phone_number)
+    with postgres_connection(settings) as connection:
+        with connection.cursor() as cursor:
+            if existing:
+                cursor.execute(
+                    """
+                    UPDATE whatsapp_blocked_contacts
+                    SET
+                        push_name = COALESCE(%s, push_name),
+                        block_reason = %s,
+                        last_message_text = COALESCE(%s, last_message_text),
+                        last_instance_id = COALESCE(%s, last_instance_id),
+                        updated_at = CURRENT_TIMESTAMP,
+                        last_seen_at = CURRENT_TIMESTAMP
+                    WHERE phone_number = %s
+                    RETURNING
+                        id,
+                        phone_number,
+                        push_name,
+                        block_reason,
+                        first_message_text,
+                        last_message_text,
+                        reply_sent,
+                        last_instance_id,
+                        created_at,
+                        updated_at,
+                        last_seen_at
+                    """,
+                    (push_name, block_reason, message_text, instance_id, phone_number),
+                )
+                row = cursor.fetchone()
+                created = False
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO whatsapp_blocked_contacts
+                    (
+                        phone_number,
+                        push_name,
+                        block_reason,
+                        first_message_text,
+                        last_message_text,
+                        last_instance_id
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING
+                        id,
+                        phone_number,
+                        push_name,
+                        block_reason,
+                        first_message_text,
+                        last_message_text,
+                        reply_sent,
+                        last_instance_id,
+                        created_at,
+                        updated_at,
+                        last_seen_at
+                    """,
+                    (phone_number, push_name, block_reason, message_text, message_text, instance_id),
+                )
+                row = cursor.fetchone()
+                created = True
+        connection.commit()
+    return row, created
+
+
+def mark_whatsapp_blocked_contact_replied(settings: Settings, phone_number: str) -> None:
+    init_database(settings)
+    with postgres_connection(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE whatsapp_blocked_contacts
+                SET
+                    reply_sent = TRUE,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE phone_number = %s
+                """,
+                (phone_number,),
+            )
+        connection.commit()
+
+
+def delete_whatsapp_blocked_contact(settings: Settings, phone_number: str) -> bool:
+    init_database(settings)
+    with postgres_connection(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM whatsapp_blocked_contacts WHERE phone_number = %s RETURNING phone_number",
+                (phone_number,),
+            )
+            row = cursor.fetchone()
+        connection.commit()
+    return row is not None
+
+
+def list_whatsapp_blocked_contacts(
+    settings: Settings,
+    limit: int = 100,
+) -> list[DbRow]:
+    init_database(settings)
+    with postgres_connection(settings) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    phone_number,
+                    push_name,
+                    block_reason,
+                    first_message_text,
+                    last_message_text,
+                    reply_sent,
+                    last_instance_id,
+                    created_at,
+                    updated_at,
+                    last_seen_at
+                FROM whatsapp_blocked_contacts
+                ORDER BY updated_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cursor.fetchall()
+    return rows

@@ -2,15 +2,35 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from typing import Iterable
 
 from langchain_core.documents import Document
 
 from .config import Settings
+from .database import (
+    count_active_whatsapp_allowed_contacts,
+    fetch_whatsapp_allowed_contact,
+    fetch_whatsapp_blocked_contact,
+    touch_whatsapp_allowed_contact_seen,
+    upsert_whatsapp_blocked_contact,
+)
+from .evolution import normalize_phone_number
 
 
 class GuardrailViolation(ValueError):
     """Raised when a configured guardrail blocks a request."""
+
+
+@dataclass(slots=True)
+class WhatsAppAccessBlocked(GuardrailViolation):
+    phone_number: str
+    should_reply: bool
+
+    def __init__(self, message: str, phone_number: str, should_reply: bool) -> None:
+        super().__init__(message)
+        self.phone_number = phone_number
+        self.should_reply = should_reply
 
 
 FORBIDDEN_SQL_TOKENS = (
@@ -146,3 +166,57 @@ def format_sources(documents: list[Document]) -> str:
             }
         )
     return json.dumps(payload, ensure_ascii=True, indent=2)
+
+
+def validate_whatsapp_sender_access(
+    settings: Settings,
+    phone_number: str,
+    push_name: str | None = None,
+    message_text: str | None = None,
+    instance_id: str | None = None,
+) -> str:
+    normalized_phone = normalize_phone_number(phone_number)
+    if not normalized_phone:
+        raise WhatsAppAccessBlocked(
+            "Nao foi possivel identificar o numero do remetente.",
+            phone_number="unknown",
+            should_reply=False,
+        )
+
+    if count_active_whatsapp_allowed_contacts(settings) < 1:
+        return normalized_phone
+
+    allowed_contact = fetch_whatsapp_allowed_contact(settings, normalized_phone)
+    if allowed_contact and bool(allowed_contact.get("is_active")):
+        touch_whatsapp_allowed_contact_seen(settings, normalized_phone)
+        return normalized_phone
+
+    blocked_contact = fetch_whatsapp_blocked_contact(settings, normalized_phone)
+    if blocked_contact:
+        upsert_whatsapp_blocked_contact(
+            settings=settings,
+            phone_number=normalized_phone,
+            block_reason="not_authorized",
+            push_name=push_name,
+            message_text=message_text,
+            instance_id=instance_id,
+        )
+        raise WhatsAppAccessBlocked(
+            settings.evolution_unauthorized_number_message,
+            phone_number=normalized_phone,
+            should_reply=not bool(blocked_contact.get("reply_sent")),
+        )
+
+    upsert_whatsapp_blocked_contact(
+        settings=settings,
+        phone_number=normalized_phone,
+        block_reason="not_authorized",
+        push_name=push_name,
+        message_text=message_text,
+        instance_id=instance_id,
+    )
+    raise WhatsAppAccessBlocked(
+        settings.evolution_unauthorized_number_message,
+        phone_number=normalized_phone,
+        should_reply=True,
+    )

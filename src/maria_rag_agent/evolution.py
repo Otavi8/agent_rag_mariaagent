@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -8,10 +9,18 @@ import httpx
 from .config import Settings
 
 
+def normalize_phone_number(value: str | None) -> str | None:
+    if not value:
+        return None
+    digits = re.sub(r"\D", "", value)
+    return digits or None
+
+
 def normalize_whatsapp_jid(value: str | None) -> str | None:
     if not value:
         return None
-    return value.split(":")[0].split("@")[0].strip() or None
+    raw = value.split(":")[0].split("@")[0].strip()
+    return normalize_phone_number(raw)
 
 
 def is_group_jid(value: str | None) -> bool:

@@ -15,6 +15,7 @@ from .database import (
     fetch_evolution_instance_state_by_name,
     init_database,
     list_evolution_instance_states,
+    mark_whatsapp_blocked_contact_replied,
     register_processed_evolution_message,
     upsert_evolution_instance_state,
 )
@@ -26,7 +27,11 @@ from .evolution import (
     is_newsletter_jid,
     normalize_whatsapp_jid,
 )
-from .guardrails import GuardrailViolation
+from .guardrails import (
+    GuardrailViolation,
+    WhatsAppAccessBlocked,
+    validate_whatsapp_sender_access,
+)
 from .vectorstore import ensure_vector_store_ready
 
 
@@ -360,6 +365,7 @@ def evolution_webhook(
     chat_jid = info.get("Chat")
     sender_jid = info.get("Sender")
     message_id = info.get("ID")
+    push_name = info.get("PushName")
 
     if settings.evolution_ignore_group_messages and (
         bool(info.get("IsGroup")) or is_group_jid(chat_jid) or is_group_jid(sender_jid)
@@ -383,6 +389,48 @@ def evolution_webhook(
         return {"received": True, "ignored": "duplicate_message"}
 
     text = extract_text_from_message_data(data)
+    try:
+        validate_whatsapp_sender_access(
+            settings=settings,
+            phone_number=sender_number,
+            push_name=str(push_name) if push_name else None,
+            message_text=text,
+            instance_id=str(instance_id),
+        )
+    except WhatsAppAccessBlocked as exc:
+        if not exc.should_reply:
+            return {
+                "received": True,
+                "reply_sent": False,
+                "conversation_id": None,
+                "event": event,
+                "path": str(request.url.path),
+                "blocked": True,
+                "reason": "unauthorized_sender",
+            }
+
+        instance_name, resolved_instance_id, resolved_instance_token = _resolve_instance_send_credentials(
+            settings=settings,
+            instance_id=str(instance_id),
+        )
+        EvolutionGoClient(settings).send_text(
+            number=sender_number,
+            text=str(exc),
+            instance_name=instance_name,
+            instance_id=resolved_instance_id,
+            api_key_override=resolved_instance_token,
+        )
+        mark_whatsapp_blocked_contact_replied(settings, exc.phone_number)
+        return {
+            "received": True,
+            "reply_sent": True,
+            "conversation_id": None,
+            "event": event,
+            "path": str(request.url.path),
+            "blocked": True,
+            "reason": "unauthorized_sender",
+        }
+
     if not text:
         if not settings.evolution_reply_to_media_without_text:
             return {"received": True, "ignored": "no_text"}

@@ -6,6 +6,7 @@ import sys
 
 from .config import get_settings
 from .database import init_database, seed_database
+from .evolution import normalize_phone_number
 from .guardrails import GuardrailViolation
 
 
@@ -92,6 +93,38 @@ def build_parser() -> argparse.ArgumentParser:
     )
     list_memories_parser.add_argument("user_id", help="User id.")
     list_memories_parser.add_argument("--store-id", dest="store_id")
+
+    authorize_whatsapp_parser = subparsers.add_parser(
+        "authorize-whatsapp-user",
+        help="Authorize a WhatsApp number to receive answers from the agent.",
+    )
+    authorize_whatsapp_parser.add_argument("user_name", help="Display name for the authorized user.")
+    authorize_whatsapp_parser.add_argument("phone_number", help="WhatsApp number.")
+    authorize_whatsapp_parser.add_argument("--notes", dest="notes")
+
+    list_whatsapp_users_parser = subparsers.add_parser(
+        "list-whatsapp-users",
+        help="List authorized WhatsApp users.",
+    )
+    list_whatsapp_users_parser.add_argument("--all", dest="include_inactive", action="store_true")
+
+    deactivate_whatsapp_parser = subparsers.add_parser(
+        "deactivate-whatsapp-user",
+        help="Deactivate an authorized WhatsApp number without deleting its history.",
+    )
+    deactivate_whatsapp_parser.add_argument("phone_number", help="WhatsApp number.")
+
+    list_blocked_whatsapp_parser = subparsers.add_parser(
+        "list-blocked-whatsapp",
+        help="List blocked WhatsApp numbers.",
+    )
+    list_blocked_whatsapp_parser.add_argument("--limit", dest="limit", type=int, default=100)
+
+    unblock_whatsapp_parser = subparsers.add_parser(
+        "unblock-whatsapp-number",
+        help="Remove a WhatsApp number from the blocked list.",
+    )
+    unblock_whatsapp_parser.add_argument("phone_number", help="WhatsApp number.")
 
     return parser
 
@@ -219,6 +252,79 @@ def handle_list_user_memories(user_id: str, store_id: str | None) -> None:
     print(json.dumps(payload, ensure_ascii=True, indent=2))
 
 
+def handle_authorize_whatsapp_user(
+    user_name: str,
+    phone_number: str,
+    notes: str | None,
+) -> None:
+    settings = get_settings()
+    from .database import delete_whatsapp_blocked_contact, upsert_whatsapp_allowed_contact
+
+    normalized_phone = normalize_phone_number(phone_number)
+    if not normalized_phone:
+        raise ValueError("Informe um numero de WhatsApp valido para autorizacao.")
+
+    row = upsert_whatsapp_allowed_contact(
+        settings=settings,
+        user_name=user_name,
+        phone_number=normalized_phone,
+        notes=notes,
+        is_active=True,
+    )
+    delete_whatsapp_blocked_contact(settings, normalized_phone)
+    print(json.dumps(dict(row), ensure_ascii=True, indent=2, default=str))
+
+
+def handle_list_whatsapp_users(include_inactive: bool) -> None:
+    settings = get_settings()
+    from .database import list_whatsapp_allowed_contacts
+
+    rows = list_whatsapp_allowed_contacts(settings, active_only=not include_inactive)
+    print(json.dumps(rows, ensure_ascii=True, indent=2, default=str))
+
+
+def handle_deactivate_whatsapp_user(phone_number: str) -> None:
+    settings = get_settings()
+    from .database import set_whatsapp_allowed_contact_active
+
+    normalized_phone = normalize_phone_number(phone_number)
+    if not normalized_phone:
+        raise ValueError("Informe um numero de WhatsApp valido para desativacao.")
+
+    row = set_whatsapp_allowed_contact_active(settings, normalized_phone, is_active=False)
+    if not row:
+        raise ValueError("Numero nao encontrado na lista de autorizados.")
+    print(json.dumps(dict(row), ensure_ascii=True, indent=2, default=str))
+
+
+def handle_list_blocked_whatsapp(limit: int) -> None:
+    settings = get_settings()
+    from .database import list_whatsapp_blocked_contacts
+
+    rows = list_whatsapp_blocked_contacts(settings, limit=limit)
+    print(json.dumps(rows, ensure_ascii=True, indent=2, default=str))
+
+
+def handle_unblock_whatsapp_number(phone_number: str) -> None:
+    settings = get_settings()
+    from .database import delete_whatsapp_blocked_contact
+
+    normalized_phone = normalize_phone_number(phone_number)
+    if not normalized_phone:
+        raise ValueError("Informe um numero de WhatsApp valido para desbloqueio.")
+
+    removed = delete_whatsapp_blocked_contact(settings, normalized_phone)
+    if not removed:
+        raise ValueError("Numero nao encontrado na lista de bloqueados.")
+    print(
+        json.dumps(
+            {"phone_number": normalized_phone, "unblocked": True},
+            ensure_ascii=True,
+            indent=2,
+        )
+    )
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -278,6 +384,33 @@ def main() -> None:
     if args.command == "list-user-memories":
         raise SystemExit(
             run_user_safe(lambda: handle_list_user_memories(args.user_id, args.store_id))
+        )
+
+    if args.command == "authorize-whatsapp-user":
+        raise SystemExit(
+            run_user_safe(
+                lambda: handle_authorize_whatsapp_user(
+                    args.user_name,
+                    args.phone_number,
+                    args.notes,
+                )
+            )
+        )
+
+    if args.command == "list-whatsapp-users":
+        raise SystemExit(run_user_safe(lambda: handle_list_whatsapp_users(args.include_inactive)))
+
+    if args.command == "deactivate-whatsapp-user":
+        raise SystemExit(
+            run_user_safe(lambda: handle_deactivate_whatsapp_user(args.phone_number))
+        )
+
+    if args.command == "list-blocked-whatsapp":
+        raise SystemExit(run_user_safe(lambda: handle_list_blocked_whatsapp(args.limit)))
+
+    if args.command == "unblock-whatsapp-number":
+        raise SystemExit(
+            run_user_safe(lambda: handle_unblock_whatsapp_number(args.phone_number))
         )
 
     parser.error(f"Unsupported command: {args.command}")
