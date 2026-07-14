@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import NAMESPACE_URL, uuid5
+
 from .runtime import configure_runtime
 
 configure_runtime()
@@ -105,10 +107,13 @@ def reindex_vector_store(settings: Settings) -> dict[str, int]:
     for index, chunk in enumerate(chunks):
         chunk.metadata["chunk_index"] = index
 
-    ids = [
-        f"{chunk.metadata.get('table')}:{chunk.metadata.get('record_id')}:{chunk.metadata.get('chunk_index')}"
-        for chunk in chunks
-    ]
+    ids = []
+    for chunk in chunks:
+        readable_id = (
+            f"{chunk.metadata.get('table')}:{chunk.metadata.get('record_id')}:{chunk.metadata.get('chunk_index')}"
+        )
+        chunk.metadata["readable_id"] = readable_id
+        ids.append(str(uuid5(NAMESPACE_URL, readable_id)))
 
     reset_vector_store(settings)
     embeddings = build_embeddings(settings)
