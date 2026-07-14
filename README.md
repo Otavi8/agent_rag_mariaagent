@@ -5,33 +5,83 @@ Assistente de estudo com arquitetura pronta para producao leve, pensada para res
 ## O que este projeto entrega
 
 - `PostgreSQL` como banco transacional principal
-- `Chroma` como banco vetorial local
+- `Qdrant` como banco vetorial
 - `LangChain` para orquestracao do agent e das tools
 - `FastAPI` para API e webhook
+- `Flask` para chat web operacional
 - `Evolution Go` para integracao com WhatsApp
 - `Traefik` para borda HTTP/HTTPS no deploy com Docker
+- `Langfuse`, `Prometheus` e `Grafana` para observabilidade
+- `MinIO` para armazenar regras operacionais em arquivos `.md` e `.txt`
 - memoria conversacional persistente por usuario e conversa
 
 ## Arquitetura em uma frase
 
-Os dados operacionais ficam no `PostgreSQL`, sao indexados no `Chroma`, e a Maria responde usando um modelo hibrido que combina busca vetorial com consulta SQL somente leitura.
+Os dados operacionais ficam no `PostgreSQL`, as regras ficam no `MinIO`, tudo e indexado no `Qdrant`, e a Maria responde usando um modelo hibrido que combina busca vetorial com consulta SQL somente leitura.
 
 ## Fluxo principal
 
 1. O `PostgreSQL` guarda os dados da operacao.
-2. O pipeline transforma linhas das tabelas em `Document`.
-3. Os documentos sao quebrados em chunks e vetorizados no `Chroma`.
+2. O pipeline transforma linhas das tabelas e arquivos de regras do MinIO em `Document`.
+3. Os documentos sao quebrados em chunks e vetorizados no `Qdrant`.
 4. O agent decide entre `semantic_search` para contexto semantico e `sql_read_only_query` para dados exatos.
-5. A resposta pode sair por CLI, API HTTP ou WhatsApp.
+5. A resposta pode sair por CLI, API HTTP, chat web Flask ou WhatsApp.
 6. No WhatsApp, o `Evolution Go` recebe a mensagem e chama o webhook da Maria.
 7. No deploy, o `Traefik` publica a stack com TLS e roteamento por host.
 
 ## Casos de uso
 
 - responder perguntas sobre vendas, estoque e cobertura de equipe
+- responder perguntas de demo considerando dados de 14/04/2026 ate 14/07/2026
+- analisar compras, entregas de fornecedores, pedidos de clientes, metas e alteracoes de preco
+- aplicar regras operacionais cadastradas por usuarios no MinIO
 - manter contexto entre conversas sem reenviar todo o historico
 - expor o agent por API para outras integracoes
 - operar um fluxo de atendimento por WhatsApp com uma stack unica em Docker
+
+## Dados demonstrativos
+
+O seed atual carrega uma base de autopecas com dados entre `14/04/2026` e `14/07/2026`. Para a demonstracao, perguntas como "hoje" devem considerar `14/07/2026`.
+
+Tabelas de negocio indexadas:
+
+- `product_catalog`
+- `sales`
+- `employees`
+- `absenteeism_events`
+- `purchase_orders`
+- `inventory_movements`
+- `daily_stock_snapshot`
+- `customer_orders`
+- `sales_targets`
+- `supplier_deliveries`
+- `product_price_history`
+
+Depois de alterar ou recarregar esses dados, rode `seed-db` e depois `reindex` para atualizar PostgreSQL e Qdrant.
+
+## Regras operacionais no MinIO
+
+Usuarios podem cadastrar regras em arquivos `.md` ou `.txt` no bucket `maria-rules`, dentro do prefixo `rules/`.
+
+Exemplo de arquivo:
+
+```md
+# Regras comerciais
+
+- Produto abaixo do ponto de reposicao deve ser tratado como critico.
+- Pedido de cliente atrasado tem prioridade sobre compra planejada.
+- Para a demonstracao, considerar 14/07/2026 como data atual.
+```
+
+Comandos uteis:
+
+```bash
+docker compose exec app python -m maria_rag_agent.cli ensure-rules-bucket
+docker compose exec app python -m maria_rag_agent.cli list-rules
+docker compose exec app python -m maria_rag_agent.cli reindex
+```
+
+O `reindex` busca as regras do MinIO e grava junto com os dados do PostgreSQL no Qdrant. Se o MinIO estiver vazio ou indisponivel, a aplicacao continua funcionando com os dados do banco.
 
 ## Estrutura principal
 
@@ -50,7 +100,9 @@ src/maria_rag_agent/
   prompts.py
   tools.py
   vectorstore.py
+  web.py
 docker/
+observability/
 data/
 storage/
 Dockerfile
@@ -173,12 +225,24 @@ Subir a API local:
 python -m maria_rag_agent.api
 ```
 
+Subir o chat web local:
+
+```powershell
+python -m maria_rag_agent.web
+```
+
 ## Endpoints principais
 
 Health check:
 
 ```bash
 curl http://localhost:8000/health
+```
+
+Metricas Prometheus:
+
+```bash
+curl http://localhost:8000/metrics
 ```
 
 Pergunta via HTTP:
@@ -211,8 +275,13 @@ O projeto inclui uma stack unica em [docker-compose.yml](docker-compose.yml) com
 
 - `traefik`
 - `postgres`
+- `qdrant`
 - `app`
+- `python`
+- `web`
 - `evolution-go`
+- `prometheus`
+- `grafana`
 
 Subir toda a stack:
 
@@ -225,8 +294,10 @@ Ver logs:
 ```bash
 docker compose logs -f traefik
 docker compose logs -f app
+docker compose logs -f web
 docker compose logs -f evolution-go
 docker compose logs -f postgres
+docker compose logs -f qdrant
 ```
 
 Parar a stack:
@@ -244,6 +315,24 @@ docker compose exec app python -m maria_rag_agent.cli reindex
 
 Esse fluxo funciona porque `./data` e montado em `/app/data` no container da app.
 
+Para usar a CLI por um container dedicado, este comando tambem passa a funcionar:
+
+```bash
+docker compose exec python cli.py ask "quantas vendas tivemos ?"
+```
+
+Chat web:
+
+```text
+https://chat.seudominio.com
+```
+
+Grafana:
+
+```text
+https://grafana.seudominio.com
+```
+
 ## Variaveis mais importantes
 
 Banco e API:
@@ -256,6 +345,14 @@ Banco e API:
 
 RAG:
 
+- `QDRANT_URL`
+- `QDRANT_API_KEY`
+- `MINIO_ENABLED`
+- `MINIO_ENDPOINT`
+- `MINIO_ACCESS_KEY`
+- `MINIO_SECRET_KEY`
+- `MINIO_RULES_BUCKET`
+- `MINIO_RULES_PREFIX`
 - `SOURCE_TABLES`
 - `CHUNK_SIZE`
 - `CHUNK_OVERLAP`
@@ -285,8 +382,20 @@ Traefik:
 - `TRAEFIK_ACME_EMAIL`
 - `TRAEFIK_DASHBOARD_HOST`
 - `TRAEFIK_APP_HOST`
+- `TRAEFIK_WEB_HOST`
 - `TRAEFIK_EVOLUTION_HOST`
+- `TRAEFIK_MINIO_HOST`
+- `TRAEFIK_GRAFANA_HOST`
+- `TRAEFIK_PROMETHEUS_HOST`
 - `TRAEFIK_BASIC_AUTH_USERS`
+
+Observabilidade:
+
+- `LANGFUSE_ENABLED`
+- `LANGFUSE_PUBLIC_KEY`
+- `LANGFUSE_SECRET_KEY`
+- `LANGFUSE_HOST`
+- `GRAFANA_ADMIN_PASSWORD`
 
 Veja os defaults em [.env.example](.env.example).
 
@@ -311,6 +420,8 @@ Veja os defaults em [.env.example](.env.example).
 
 - o dominio atual de exemplo e autopecas, mas a arquitetura e generica
 - o banco principal nao e mais `SQLite`; agora e `PostgreSQL`
-- o `Chroma` continua local em `./storage`
+- o indice vetorial agora fica no `Qdrant`; rode `reindex` apos migrar dados
+- regras em `.md` e `.txt` no MinIO entram no Qdrant pelo mesmo `reindex`
+- os dados demonstrativos terminam em `14/07/2026`; rode `seed-db` antes do `reindex` para recarregar esse periodo
 - a chave real da OpenAI nunca deve ser commitada
 - antes de publicar, revise `.env`, dominios, credenciais e hashes de `basic auth`

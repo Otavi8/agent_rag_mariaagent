@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-import shutil
-
 from .runtime import configure_runtime
 
 configure_runtime()
 
-from langchain_chroma import Chroma
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import OpenAIEmbeddings
+from langchain_qdrant import QdrantVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import Distance, VectorParams
 
-from .config import PROJECT_ROOT, Settings
+from .config import Settings
 from .database import fetch_rows_for_indexing, init_database
 from .documents import build_documents
+from .rules import load_rule_documents_safely
 
 
 def build_embeddings(settings: Settings):
@@ -53,32 +54,39 @@ def build_text_splitter(settings: Settings) -> RecursiveCharacterTextSplitter:
     )
 
 
-def build_vector_store(settings: Settings) -> Chroma:
+def build_qdrant_client(settings: Settings) -> QdrantClient:
+    kwargs = {"url": settings.qdrant_url}
+    if settings.qdrant_api_key:
+        kwargs["api_key"] = settings.qdrant_api_key
+    return QdrantClient(**kwargs)
+
+
+def build_vector_store(settings: Settings) -> QdrantVectorStore:
     embeddings = build_embeddings(settings)
-    settings.vector_db_dir_abs.mkdir(parents=True, exist_ok=True)
-    return Chroma(
+    return QdrantVectorStore.from_existing_collection(
+        embedding=embeddings,
         collection_name=settings.vector_collection_name,
-        persist_directory=str(settings.vector_db_dir_abs),
-        embedding_function=embeddings,
+        url=settings.qdrant_url,
+        api_key=settings.qdrant_api_key,
+        prefer_grpc=settings.qdrant_prefer_grpc,
     )
 
 
 def reset_vector_store(settings: Settings) -> None:
-    target = settings.vector_db_dir_abs
-    project_root = PROJECT_ROOT.resolve()
-
-    if not target.exists():
-        return
-
-    if project_root not in target.resolve().parents and target.resolve() != project_root:
-        raise RuntimeError("Refusing to delete a vector store outside the project root.")
-
-    shutil.rmtree(target)
+    client = build_qdrant_client(settings)
+    if client.collection_exists(settings.vector_collection_name):
+        client.delete_collection(settings.vector_collection_name)
 
 
 def vector_store_is_ready(settings: Settings) -> bool:
-    target = settings.vector_db_dir_abs
-    return target.exists() and any(target.iterdir())
+    try:
+        client = build_qdrant_client(settings)
+        if not client.collection_exists(settings.vector_collection_name):
+            return False
+        result = client.count(collection_name=settings.vector_collection_name, exact=False)
+        return result.count > 0
+    except Exception:
+        return False
 
 
 def ensure_vector_store_ready(settings: Settings) -> None:
@@ -89,7 +97,9 @@ def ensure_vector_store_ready(settings: Settings) -> None:
 def reindex_vector_store(settings: Settings) -> dict[str, int]:
     init_database(settings)
     rows_by_table = fetch_rows_for_indexing(settings)
-    base_documents = build_documents(rows_by_table)
+    database_documents = build_documents(rows_by_table)
+    rule_documents = load_rule_documents_safely(settings)
+    base_documents = [*database_documents, *rule_documents]
     chunks = build_text_splitter(settings).split_documents(base_documents)
 
     for index, chunk in enumerate(chunks):
@@ -101,7 +111,18 @@ def reindex_vector_store(settings: Settings) -> dict[str, int]:
     ]
 
     reset_vector_store(settings)
-    vector_store = build_vector_store(settings)
+    embeddings = build_embeddings(settings)
+    vector_size = len(embeddings.embed_query("qdrant vector size probe"))
+    client = build_qdrant_client(settings)
+    client.create_collection(
+        collection_name=settings.vector_collection_name,
+        vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+    )
+    vector_store = QdrantVectorStore(
+        client=client,
+        collection_name=settings.vector_collection_name,
+        embedding=embeddings,
+    )
 
     for start in range(0, len(chunks), settings.index_batch_size):
         end = start + settings.index_batch_size
@@ -109,6 +130,8 @@ def reindex_vector_store(settings: Settings) -> dict[str, int]:
 
     return {
         "base_documents": len(base_documents),
+        "database_documents": len(database_documents),
+        "rule_documents": len(rule_documents),
         "chunks": len(chunks),
         "tables": len(rows_by_table),
     }

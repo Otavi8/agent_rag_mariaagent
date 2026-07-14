@@ -21,6 +21,13 @@ from .memory import (
     maybe_refresh_conversation_summary,
     store_turn,
 )
+from .observability import (
+    get_langfuse_callbacks,
+    get_tool_trace,
+    reset_tool_trace,
+    restore_tool_trace,
+    timed_agent_request,
+)
 from .prompts import build_system_prompt
 from .tools import build_tools
 
@@ -31,6 +38,7 @@ class AgentReply:
     conversation_id: str
     user_id: str
     store_id: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
 
 
 def build_chat_model(settings: Settings):
@@ -141,6 +149,7 @@ def ask_agent(
     conversation_id: str | None = None,
     user_id: str = "default-user",
     store_id: str | None = None,
+    channel: str = "api",
 ) -> AgentReply:
     cleaned_question = validate_question(question, settings)
     session: ConversationSession = ensure_conversation(
@@ -158,17 +167,32 @@ def ask_agent(
         user_id=session.user_id,
         store_id=session.store_id,
     )
-    result = agent.invoke(
-        {
-            "messages": memory_messages
-            + [
+    token = reset_tool_trace()
+    try:
+        with timed_agent_request(channel):
+            result = agent.invoke(
                 {
-                    "role": "user",
-                    "content": cleaned_question,
-                }
-            ]
-        }
-    )
+                    "messages": memory_messages
+                    + [
+                        {
+                            "role": "user",
+                            "content": cleaned_question,
+                        }
+                    ]
+                },
+                config={
+                    "callbacks": get_langfuse_callbacks(settings),
+                    "metadata": {
+                        "conversation_id": session.conversation_id,
+                        "user_id": session.user_id,
+                        "store_id": session.store_id,
+                    },
+                },
+            )
+        tool_calls = get_tool_trace()
+    finally:
+        restore_tool_trace(token)
+
     answer = extract_answer(result)
 
     if not answer.strip():
@@ -192,4 +216,5 @@ def ask_agent(
         conversation_id=session.conversation_id,
         user_id=session.user_id,
         store_id=session.store_id,
+        tool_calls=tool_calls,
     )

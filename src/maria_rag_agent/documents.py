@@ -77,6 +77,99 @@ def render_row(table_name: str, row: dict[str, Any]) -> str:
             f"Observacoes: {row['notes'] or 'n/a'}"
         )
 
+    if table_name == "purchase_orders":
+        return (
+            "Tipo de documento: pedido de compra\n"
+            f"Codigo do pedido: {row['po_code']}\n"
+            f"Data do pedido: {row['order_date']}\n"
+            f"Data prevista de entrega: {row['expected_delivery_date']}\n"
+            f"Fornecedor: {row['supplier_name']}\n"
+            f"SKU: {row['sku']}\n"
+            f"Quantidade pedida: {row['quantity_ordered']}\n"
+            f"Custo unitario: {row['unit_cost']}\n"
+            f"Custo total: {row['total_cost']}\n"
+            f"Status do pedido: {row['status']}\n"
+            f"Comprador responsavel: {row['buyer_name']}\n"
+            f"Observacoes: {row['notes'] or 'n/a'}"
+        )
+
+    if table_name == "inventory_movements":
+        return (
+            "Tipo de documento: movimentacao de estoque\n"
+            f"Data da movimentacao: {row['movement_date']}\n"
+            f"SKU: {row['sku']}\n"
+            f"Tipo de movimentacao: {row['movement_type']}\n"
+            f"Quantidade movimentada: {row['quantity_delta']}\n"
+            f"Estoque apos movimentacao: {row['stock_after_qty']}\n"
+            f"Tipo de referencia: {row['reference_type']}\n"
+            f"Codigo de referencia: {row['reference_code'] or 'n/a'}\n"
+            f"Observacoes: {row['notes'] or 'n/a'}"
+        )
+
+    if table_name == "daily_stock_snapshot":
+        return (
+            "Tipo de documento: snapshot diario de estoque\n"
+            f"Data do snapshot: {row['snapshot_date']}\n"
+            f"SKU: {row['sku']}\n"
+            f"Quantidade disponivel: {row['available_qty']}\n"
+            f"Quantidade reservada: {row['reserved_qty']}\n"
+            f"Ponto de reposicao: {row['reorder_point_qty']}\n"
+            f"Status do estoque: {row['stock_status']}\n"
+            f"Dias de cobertura: {row['days_of_cover']}"
+        )
+
+    if table_name == "customer_orders":
+        return (
+            "Tipo de documento: pedido de cliente\n"
+            f"Codigo do pedido: {row['order_code']}\n"
+            f"Data do pedido: {row['order_date']}\n"
+            f"Cliente: {row['customer_name']}\n"
+            f"Canal: {row['channel']}\n"
+            f"SKU: {row['sku']}\n"
+            f"Quantidade pedida: {row['quantity_ordered']}\n"
+            f"Valor do pedido: {row['order_value']}\n"
+            f"Status do pedido: {row['order_status']}\n"
+            f"Data prometida: {row['promised_date']}\n"
+            f"Data atendida: {row['fulfilled_date'] or 'n/a'}\n"
+            f"Loja: {row['store_id']}"
+        )
+
+    if table_name == "sales_targets":
+        return (
+            "Tipo de documento: meta comercial\n"
+            f"Mes da meta: {row['target_month']}\n"
+            f"Categoria: {row['category']}\n"
+            f"Canal: {row['channel']}\n"
+            f"Meta de receita: {row['revenue_target']}\n"
+            f"Meta de margem bruta percentual: {row['gross_margin_target_pct']}\n"
+            f"Setor responsavel: {row['responsible_sector']}"
+        )
+
+    if table_name == "supplier_deliveries":
+        return (
+            "Tipo de documento: entrega de fornecedor\n"
+            f"Data da entrega: {row['delivery_date']}\n"
+            f"Fornecedor: {row['supplier_name']}\n"
+            f"Codigo do pedido de compra: {row['po_code']}\n"
+            f"SKU: {row['sku']}\n"
+            f"Quantidade entregue: {row['quantity_delivered']}\n"
+            f"Status da entrega: {row['delivery_status']}\n"
+            f"Dias de atraso: {row['delay_days']}\n"
+            f"Numero da nota fiscal: {row['invoice_number']}\n"
+            f"Observacoes: {row['notes'] or 'n/a'}"
+        )
+
+    if table_name == "product_price_history":
+        return (
+            "Tipo de documento: historico de preco de produto\n"
+            f"Data da alteracao: {row['changed_at']}\n"
+            f"SKU: {row['sku']}\n"
+            f"Preco anterior: {row['old_price']}\n"
+            f"Preco novo: {row['new_price']}\n"
+            f"Motivo da alteracao: {row['change_reason']}\n"
+            f"Aprovado por: {row['approved_by']}"
+        )
+
     lines = [f"Tipo de documento: linha de banco da tabela {table_name}"]
     for key in row.keys():
         lines.append(f"{key}: {row[key]}")
@@ -96,6 +189,14 @@ def build_documents(rows_by_table: dict[str, list[dict[str, Any]]]) -> list[Docu
                 title = row["employee_name"]
             elif "product_description" in row.keys():
                 title = row["product_description"]
+            elif "po_code" in row.keys():
+                title = row["po_code"]
+            elif "order_code" in row.keys():
+                title = row["order_code"]
+            elif "supplier_name" in row.keys():
+                title = row["supplier_name"]
+            elif "sku" in row.keys():
+                title = row["sku"]
             documents.append(
                 Document(
                     page_content=render_row(table_name, row),

@@ -7,7 +7,11 @@ Este guia assume uma VPS `Ubuntu` ou `Debian` limpa, com acesso SSH e dominio ap
 Crie estes registros DNS apontando para a VPS:
 
 - `maria.seudominio.com`
+- `chat.seudominio.com`
 - `evolution.seudominio.com`
+- `minio.seudominio.com`
+- `grafana.seudominio.com`
+- `prometheus.seudominio.com`
 - `traefik.seudominio.com`
 
 Sem isso, o `Traefik` nao consegue emitir certificados TLS com `Let's Encrypt`.
@@ -102,11 +106,30 @@ EVOLUTION_API_KEY=sua-chave-segura-do-evolution
 EVOLUTION_INSTANCE_NAME=maria-whatsapp
 EVOLUTION_INTERNAL_WEBHOOK_URL=http://app:8000/webhooks/evolution
 
+QDRANT_URL=http://qdrant:6333
+
+MINIO_ENABLED=true
+MINIO_ENDPOINT=minio:9000
+MINIO_ACCESS_KEY=mariaagent
+MINIO_SECRET_KEY=uma-senha-forte-minio
+MINIO_RULES_BUCKET=maria-rules
+MINIO_RULES_PREFIX=rules/
+
+LANGFUSE_ENABLED=true
+LANGFUSE_PUBLIC_KEY=sua-public-key-langfuse
+LANGFUSE_SECRET_KEY=sua-secret-key-langfuse
+LANGFUSE_HOST=https://cloud.langfuse.com
+
 TRAEFIK_ACME_EMAIL=admin@seudominio.com
 TRAEFIK_DASHBOARD_HOST=traefik.seudominio.com
 TRAEFIK_APP_HOST=maria.seudominio.com
+TRAEFIK_WEB_HOST=chat.seudominio.com
 TRAEFIK_EVOLUTION_HOST=evolution.seudominio.com
+TRAEFIK_MINIO_HOST=minio.seudominio.com
+TRAEFIK_GRAFANA_HOST=grafana.seudominio.com
+TRAEFIK_PROMETHEUS_HOST=prometheus.seudominio.com
 TRAEFIK_BASIC_AUTH_USERS=admin:gere-seu-hash-aqui
+GRAFANA_ADMIN_PASSWORD=troque-esta-senha
 ```
 
 ## 7. Gerar o hash do Basic Auth do Traefik
@@ -138,8 +161,12 @@ Verifique:
 docker compose ps
 docker compose logs -f traefik
 docker compose logs -f app
+docker compose logs -f web
 docker compose logs -f evolution-go
 docker compose logs -f postgres
+docker compose logs -f qdrant
+docker compose logs -f prometheus
+docker compose logs -f grafana
 ```
 
 ## 9. Inicializar os dados
@@ -149,6 +176,24 @@ Se for ambiente novo:
 ```bash
 docker compose exec app python -m maria_rag_agent.cli init-db
 docker compose exec app python -m maria_rag_agent.cli seed-db
+docker compose exec app python -m maria_rag_agent.cli ensure-rules-bucket
+docker compose exec app python -m maria_rag_agent.cli reindex
+```
+
+O `seed-db` recria os dados demonstrativos de `14/04/2026` ate `14/07/2026`, incluindo vendas, estoque, compras, entregas, pedidos de clientes, metas, precos e equipe. O `ensure-rules-bucket` cria o bucket de regras no MinIO. O `reindex` recria a colecao no Qdrant com base nos dados do PostgreSQL e nas regras `.md`/`.txt` encontradas no MinIO.
+
+Se a VPS ja tiver uma versao antiga da base, rode novamente:
+
+```bash
+docker compose exec app python -m maria_rag_agent.cli seed-db
+docker compose exec app python -m maria_rag_agent.cli ensure-rules-bucket
+docker compose exec app python -m maria_rag_agent.cli reindex
+```
+
+Para inserir regras, acesse o console do MinIO pelo host configurado em `TRAEFIK_MINIO_HOST`, crie ou abra o bucket `maria-rules`, envie arquivos `.md` ou `.txt` dentro da pasta `rules/`, e rode:
+
+```bash
+docker compose exec app python -m maria_rag_agent.cli list-rules
 docker compose exec app python -m maria_rag_agent.cli reindex
 ```
 
@@ -168,6 +213,18 @@ Health check:
 
 ```bash
 curl -u admin:SUA-SENHA-FORTE https://maria.seudominio.com/health
+```
+
+Chat web:
+
+```bash
+curl -u admin:SUA-SENHA-FORTE https://chat.seudominio.com/
+```
+
+Grafana:
+
+```text
+https://grafana.seudominio.com
 ```
 
 Pergunta de teste:

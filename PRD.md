@@ -9,11 +9,14 @@ Documentar um modelo replicavel de agent RAG com banco relacional, banco vetoria
 Este projeto entrega uma base de agent operacional com:
 
 - `PostgreSQL` como fonte de verdade
-- `Chroma` para recuperacao semantica local
+- `Qdrant` para recuperacao semantica
+- `MinIO` para regras operacionais em arquivos
 - `LangChain` para coordenar tools e resposta
 - `FastAPI` para API e webhook
+- `Flask` para chat web com visibilidade das consultas do agente
 - `Evolution Go` para receber e responder mensagens do WhatsApp
 - `Traefik` para publicar tudo com HTTPS em um unico `docker-compose.yml`
+- `Langfuse`, `Prometheus` e `Grafana` para tracing e monitoramento
 
 O desenho foi pensado para perguntas operacionais que misturam:
 
@@ -56,7 +59,7 @@ Personas principais:
 - autenticacao corporativa SSO
 - multi-tenant forte com isolamento por banco por cliente
 - fila de jobs distribuida
-- observabilidade enterprise
+- observabilidade enterprise alem de tracing Langfuse e dashboards Grafana basicos
 
 ## Requisitos funcionais
 
@@ -64,9 +67,17 @@ Personas principais:
 
 O sistema deve armazenar os dados operacionais em `PostgreSQL`.
 
+Base demonstrativa atual:
+
+- periodo de dados: `14/04/2026` ate `14/07/2026`
+- data de referencia para perguntas de demo como "hoje": `14/07/2026`
+- tabelas de negocio: `product_catalog`, `sales`, `employees`, `absenteeism_events`, `purchase_orders`, `inventory_movements`, `daily_stock_snapshot`, `customer_orders`, `sales_targets`, `supplier_deliveries` e `product_price_history`
+
 ### RF-02. Indexacao vetorial
 
-O sistema deve ler tabelas configuradas, converter registros em `Document`, quebrar em chunks e persistir vetores no `Chroma`.
+O sistema deve ler tabelas configuradas, converter registros em `Document`, quebrar em chunks e persistir vetores no `Qdrant`.
+
+O sistema tambem deve ler regras operacionais no MinIO em arquivos `.md` ou `.txt`, converter cada arquivo em `Document` e indexar esse contexto junto com os dados estruturados.
 
 ### RF-03. Agent hibrido
 
@@ -127,7 +138,7 @@ O sistema deve subir com um unico `docker-compose.yml`, incluindo app, banco, pr
 ### RNF-04. Persistencia
 
 - `PostgreSQL` deve persistir em volume Docker
-- `Chroma` deve persistir em `./storage`
+- `Qdrant` deve persistir em volume Docker
 
 ## Arquitetura alvo
 
@@ -138,11 +149,11 @@ Usuario
   -> Webhook FastAPI
   -> Agent LangChain
      -> SQL read only no PostgreSQL
-     -> semantic search no Chroma
+     -> semantic search no Qdrant
   -> resposta
 
 Usuario tecnico
-  -> CLI ou API HTTP
+  -> CLI, API HTTP ou chat Flask
   -> mesmo agent e mesmas tools
 ```
 
@@ -156,14 +167,22 @@ Responsabilidades:
 - armazenar memoria de conversa
 - armazenar estado de instancia do WhatsApp
 
-### 2. Chroma
+### 2. Qdrant
 
 Responsabilidades:
 
 - armazenar embeddings
 - recuperar contexto semantico
 
-### 3. LangChain agent
+### 3. MinIO
+
+Responsabilidades:
+
+- armazenar regras operacionais escritas por usuarios
+- manter arquivos `.md` e `.txt` no bucket `maria-rules`
+- disponibilizar as regras para o `reindex`
+
+### 4. LangChain agent
 
 Responsabilidades:
 
@@ -178,6 +197,14 @@ Responsabilidades:
 - expor endpoints HTTP
 - receber webhook do WhatsApp
 - acionar o agent
+
+### 4.1 Flask web
+
+Responsabilidades:
+
+- oferecer uma interface de chat para usuarios que nao estao no WhatsApp
+- exibir a resposta e as ferramentas usadas pelo agente
+- mostrar a consulta SQL executada quando a tool `sql_read_only_query` for usada
 
 ### 5. Evolution Go
 
@@ -221,7 +248,7 @@ Responsabilidades:
 2. transforma registros em documentos
 3. quebra em chunks
 4. gera embeddings
-5. persiste no `Chroma`
+5. persiste no `Qdrant`
 
 ### Fluxo D. Migracao do legado
 
@@ -316,8 +343,11 @@ Se for ambiente novo:
 ```bash
 docker compose exec app python -m maria_rag_agent.cli init-db
 docker compose exec app python -m maria_rag_agent.cli seed-db
+docker compose exec app python -m maria_rag_agent.cli ensure-rules-bucket
 docker compose exec app python -m maria_rag_agent.cli reindex
 ```
+
+O `seed-db` carrega a base demonstrativa de 3 meses ate `14/07/2026`. O `ensure-rules-bucket` prepara o bucket de regras no MinIO. O `reindex` deve ser executado depois para enviar as tabelas configuradas em `SOURCE_TABLES` e os arquivos de regra para o Qdrant.
 
 Se vier de `SQLite`:
 

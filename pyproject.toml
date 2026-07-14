@@ -5,18 +5,22 @@ build-backend = "hatchling.build"
 [project]
 name = "maria-rag-agent"
 version = "0.1.0"
-description = "Base profissional de estudo para um agent RAG hibrido com PostgreSQL, Chroma, LangChain e Evolution Go."
+description = "Base profissional de estudo para um agent RAG hibrido com PostgreSQL, Qdrant, LangChain e Evolution Go."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "chromadb>=0.5.5",
   "fastapi>=0.115.0",
+  "flask>=3.0.0",
   "httpx>=0.27.0",
   "langchain>=1.0.0",
-  "langchain-chroma>=0.2.0",
   "langchain-huggingface>=0.1.0",
   "langchain-openai>=0.2.0",
+  "langchain-qdrant>=1.0.0",
   "langchain-text-splitters>=0.3.0",
+  "langfuse>=3.0.0",
+  "minio>=7.2.0",
+  "prometheus-client>=0.21.0",
+  "prometheus-flask-exporter>=0.23.0",
   "pydantic>=2.8.0",
   "pydantic-settings>=2.4.0",
   "psycopg[binary]>=3.2.1",
@@ -37,9 +41,13 @@ ollama = [
 [project.scripts]
 maria-rag = "maria_rag_agent.cli:main"
 maria-rag-api = "maria_rag_agent.api:main"
+maria-rag-web = "maria_rag_agent.web:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/maria_rag_agent"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/maria_rag_agent/templates" = "maria_rag_agent/templates"
 
 [tool.ruff]
 line-length = 100

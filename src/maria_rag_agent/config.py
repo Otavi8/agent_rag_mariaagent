@@ -9,6 +9,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_SOURCE_TABLES = ",".join(
+    [
+        "product_catalog",
+        "sales",
+        "employees",
+        "absenteeism_events",
+        "purchase_orders",
+        "inventory_movements",
+        "daily_stock_snapshot",
+        "customer_orders",
+        "sales_targets",
+        "supplier_deliveries",
+        "product_price_history",
+    ]
+)
 
 
 class Settings(BaseSettings):
@@ -23,10 +38,12 @@ class Settings(BaseSettings):
     quiet_mode: bool = True
 
     database_url: str = "postgresql://postgres:password@postgres:5432/maria_agent"
-    vector_db_dir: Path = Field(default=Path("./storage/chroma"))
+    qdrant_url: str = "http://qdrant:6333"
+    qdrant_api_key: str | None = None
+    qdrant_prefer_grpc: bool = False
     vector_collection_name: str = "maria_rag_collection"
 
-    source_tables: str = "product_catalog,sales,employees,absenteeism_events"
+    source_tables: str = DEFAULT_SOURCE_TABLES
     index_batch_size: int = 100
     auto_reindex_on_empty_index: bool = True
 
@@ -64,12 +81,29 @@ class Settings(BaseSettings):
 
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    web_host: str = "0.0.0.0"
+    web_port: int = 8501
+    web_user_id: str = "web-user"
 
     llm_provider: str = "openai"
     llm_model: str = "gpt-4.1-mini"
     llm_temperature: float = 0.0
 
     openai_api_key: str | None = None
+    langfuse_public_key: str | None = None
+    langfuse_secret_key: str | None = None
+    langfuse_host: str = "https://cloud.langfuse.com"
+    langfuse_enabled: bool = True
+
+    minio_enabled: bool = True
+    minio_endpoint: str = "minio:9000"
+    minio_access_key: str = "mariaagent"
+    minio_secret_key: str | None = None
+    minio_secure: bool = False
+    minio_rules_bucket: str = "maria-rules"
+    minio_rules_prefix: str = "rules/"
+    minio_rules_extensions: str = ".md,.txt"
+    minio_rules_max_bytes: int = 262144
 
     embedding_provider: str = "huggingface"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
@@ -121,12 +155,14 @@ class Settings(BaseSettings):
         return value
 
     @field_validator(
-        "memory_recent_messages",
-        "memory_summarize_after_messages",
-        "memory_summary_max_chars",
-        "user_memory_top_k",
-        "api_port",
-    )
+            "memory_recent_messages",
+            "memory_summarize_after_messages",
+            "memory_summary_max_chars",
+            "user_memory_top_k",
+            "api_port",
+            "web_port",
+            "minio_rules_max_bytes",
+        )
     @classmethod
     def validate_positive_memory_values(cls, value: int) -> int:
         if value < 1:
@@ -135,7 +171,7 @@ class Settings(BaseSettings):
 
     @property
     def vector_db_dir_abs(self) -> Path:
-        return (PROJECT_ROOT / self.vector_db_dir).resolve() if not self.vector_db_dir.is_absolute() else self.vector_db_dir
+        return (PROJECT_ROOT / "storage" / "qdrant").resolve()
 
     @property
     def source_table_list(self) -> list[str]:
@@ -150,6 +186,17 @@ class Settings(BaseSettings):
         return [item.strip() for item in self.evolution_subscribe_events.split(",") if item.strip()]
 
     @property
+    def minio_rules_extension_list(self) -> list[str]:
+        extensions = []
+        for item in self.minio_rules_extensions.split(","):
+            extension = item.strip().lower()
+            if extension and not extension.startswith("."):
+                extension = f".{extension}"
+            if extension:
+                extensions.append(extension)
+        return extensions
+
+    @property
     def database_name(self) -> str:
         path = urlsplit(self.database_url).path.lstrip("/")
         return path or "postgres"
@@ -158,16 +205,25 @@ class Settings(BaseSettings):
         data = self.model_dump()
         if data.get("openai_api_key"):
             data["openai_api_key"] = "***"
+        if data.get("langfuse_public_key"):
+            data["langfuse_public_key"] = "***"
+        if data.get("langfuse_secret_key"):
+            data["langfuse_secret_key"] = "***"
+        if data.get("qdrant_api_key"):
+            data["qdrant_api_key"] = "***"
+        if data.get("minio_secret_key"):
+            data["minio_secret_key"] = "***"
         if data.get("evolution_api_key"):
             data["evolution_api_key"] = "***"
         if data.get("evolution_webhook_secret"):
             data["evolution_webhook_secret"] = "***"
         if data.get("database_url"):
             data["database_url"] = "***"
-        data["vector_db_dir"] = str(self.vector_db_dir_abs)
+        data["qdrant_url"] = self.qdrant_url
         data["source_table_list"] = self.source_table_list
         data["blocked_patterns"] = self.blocked_patterns
         data["evolution_subscribe_event_list"] = self.evolution_subscribe_event_list
+        data["minio_rules_extension_list"] = self.minio_rules_extension_list
         data["database_name"] = self.database_name
         return data
 

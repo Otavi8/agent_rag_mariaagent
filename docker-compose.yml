@@ -1,3 +1,47 @@
+x-app-base: &app-base
+  build:
+    context: .
+  env_file:
+    - .env
+  environment:
+    API_HOST: 0.0.0.0
+    API_PORT: 8000
+    WEB_HOST: 0.0.0.0
+    WEB_PORT: 8501
+    DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:change-this-password@postgres:5432/maria_agent}
+    QDRANT_URL: http://qdrant:6333
+    MINIO_ENABLED: ${MINIO_ENABLED:-true}
+    MINIO_ENDPOINT: minio:9000
+    MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-mariaagent}
+    MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-change-this-minio-secret}
+    MINIO_SECURE: "false"
+    MINIO_RULES_BUCKET: ${MINIO_RULES_BUCKET:-maria-rules}
+    MINIO_RULES_PREFIX: ${MINIO_RULES_PREFIX:-rules/}
+    MINIO_RULES_EXTENSIONS: ${MINIO_RULES_EXTENSIONS:-.md,.txt}
+    MINIO_RULES_MAX_BYTES: ${MINIO_RULES_MAX_BYTES:-262144}
+    EVOLUTION_ENABLED: "true"
+    EVOLUTION_BASE_URL: http://evolution-go:8080
+    EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-change-this-key}
+    EVOLUTION_INTERNAL_WEBHOOK_URL: http://app:8000/webhooks/evolution
+    EVOLUTION_PUBLIC_WEBHOOK_URL: ${EVOLUTION_PUBLIC_WEBHOOK_URL:-}
+    EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-maria-whatsapp}
+  depends_on:
+    postgres:
+      condition: service_healthy
+    qdrant:
+      condition: service_started
+    minio:
+      condition: service_started
+    evolution-go:
+      condition: service_started
+  volumes:
+    - ./data:/app/data
+    - ./storage:/app/storage
+  networks:
+    - backend
+    - proxy
+  restart: unless-stopped
+
 services:
   traefik:
     image: traefik:v3.1
@@ -53,33 +97,38 @@ services:
       retries: 10
     restart: unless-stopped
 
-  app:
-    build:
-      context: .
-    env_file:
-      - .env
-    environment:
-      API_HOST: 0.0.0.0
-      API_PORT: 8000
-      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:change-this-password@postgres:5432/maria_agent}
-      EVOLUTION_ENABLED: "true"
-      EVOLUTION_BASE_URL: http://evolution-go:8080
-      EVOLUTION_API_KEY: ${EVOLUTION_API_KEY:-change-this-key}
-      EVOLUTION_INTERNAL_WEBHOOK_URL: http://app:8000/webhooks/evolution
-      EVOLUTION_PUBLIC_WEBHOOK_URL: ${EVOLUTION_PUBLIC_WEBHOOK_URL:-}
-      EVOLUTION_INSTANCE_NAME: ${EVOLUTION_INSTANCE_NAME:-maria-whatsapp}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      evolution-go:
-        condition: service_started
+  qdrant:
+    image: qdrant/qdrant:v1.10.1
     volumes:
-      - ./data:/app/data
-      - ./storage:/app/storage
+      - qdrant_data:/qdrant/storage
+    networks:
+      - backend
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-mariaagent}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-change-this-minio-secret}
+    volumes:
+      - minio_data:/data
     networks:
       - backend
       - proxy
     restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.maria-minio.rule=Host(`${TRAEFIK_MINIO_HOST:-minio.example.com}`)
+      - traefik.http.routers.maria-minio.entrypoints=websecure
+      - traefik.http.routers.maria-minio.tls=true
+      - traefik.http.routers.maria-minio.tls.certresolver=letsencrypt
+      - traefik.http.routers.maria-minio.middlewares=platform-auth@docker
+      - traefik.http.services.maria-minio.loadbalancer.server.port=9001
+
+  app:
+    <<: *app-base
     labels:
       - traefik.enable=true
       - traefik.docker.network=proxy
@@ -89,6 +138,23 @@ services:
       - traefik.http.routers.maria.tls.certresolver=letsencrypt
       - traefik.http.routers.maria.middlewares=platform-auth@docker
       - traefik.http.services.maria.loadbalancer.server.port=8000
+
+  python:
+    <<: *app-base
+    command: ["sleep", "infinity"]
+
+  web:
+    <<: *app-base
+    command: ["python", "-m", "maria_rag_agent.web"]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.maria-web.rule=Host(`${TRAEFIK_WEB_HOST}`)
+      - traefik.http.routers.maria-web.entrypoints=websecure
+      - traefik.http.routers.maria-web.tls=true
+      - traefik.http.routers.maria-web.tls.certresolver=letsencrypt
+      - traefik.http.routers.maria-web.middlewares=platform-auth@docker
+      - traefik.http.services.maria-web.loadbalancer.server.port=8501
 
   evolution-go:
     image: evoapicloud/evolution-go:latest
@@ -120,6 +186,51 @@ services:
       - traefik.http.routers.evolution.middlewares=platform-auth@docker
       - traefik.http.services.evolution.loadbalancer.server.port=8080
 
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    networks:
+      - backend
+      - proxy
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.maria-prometheus.rule=Host(`${TRAEFIK_PROMETHEUS_HOST}`)
+      - traefik.http.routers.maria-prometheus.entrypoints=websecure
+      - traefik.http.routers.maria-prometheus.tls=true
+      - traefik.http.routers.maria-prometheus.tls.certresolver=letsencrypt
+      - traefik.http.routers.maria-prometheus.middlewares=platform-auth@docker
+      - traefik.http.services.maria-prometheus.loadbalancer.server.port=9090
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./observability/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./observability/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - backend
+      - proxy
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=proxy
+      - traefik.http.routers.maria-grafana.rule=Host(`${TRAEFIK_GRAFANA_HOST}`)
+      - traefik.http.routers.maria-grafana.entrypoints=websecure
+      - traefik.http.routers.maria-grafana.tls=true
+      - traefik.http.routers.maria-grafana.tls.certresolver=letsencrypt
+      - traefik.http.routers.maria-grafana.middlewares=platform-auth@docker
+      - traefik.http.services.maria-grafana.loadbalancer.server.port=3000
+
 networks:
   proxy:
     driver: bridge
@@ -128,4 +239,7 @@ networks:
 
 volumes:
   postgres_data:
+  qdrant_data:
+  minio_data:
+  grafana_data:
   traefik_letsencrypt:

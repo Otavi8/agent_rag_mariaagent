@@ -14,6 +14,7 @@ from .guardrails import (
     validate_question,
     validate_sql_query,
 )
+from .observability import record_tool_call
 from .vectorstore import build_vector_store
 
 
@@ -28,29 +29,37 @@ def build_tools(settings: Settings):
             """Search the vector database for semantic context from indexed records."""
 
             cleaned_query = validate_question(query, settings)
-            documents = vector_store.max_marginal_relevance_search(
-                cleaned_query,
-                k=settings.search_k,
-                fetch_k=settings.search_fetch_k,
-            )
-            documents = trim_documents(documents, settings)
             try:
-                documents = ensure_minimum_context(documents, settings)
-            except GuardrailViolation:
-                if settings.fallback_if_no_context:
-                    return "No relevant semantic context was retrieved from the vector database."
+                documents = vector_store.max_marginal_relevance_search(
+                    cleaned_query,
+                    k=settings.search_k,
+                    fetch_k=settings.search_fetch_k,
+                )
+                documents = trim_documents(documents, settings)
+                try:
+                    documents = ensure_minimum_context(documents, settings)
+                except GuardrailViolation:
+                    if settings.fallback_if_no_context:
+                        output = "No relevant semantic context was retrieved from the vector database."
+                        record_tool_call("semantic_search", cleaned_query, output)
+                        return output
+                    raise
+
+                parts = []
+                for document in documents:
+                    parts.append(document.page_content)
+
+                output = (
+                    "Retrieved context:\n"
+                    + "\n\n---\n\n".join(parts)
+                    + "\n\nSources:\n"
+                    + format_sources(documents)
+                )
+                record_tool_call("semantic_search", cleaned_query, output)
+                return output
+            except Exception as exc:
+                record_tool_call("semantic_search", cleaned_query, str(exc), status="error")
                 raise
-
-            parts = []
-            for document in documents:
-                parts.append(document.page_content)
-
-            return (
-                "Retrieved context:\n"
-                + "\n\n---\n\n".join(parts)
-                + "\n\nSources:\n"
-                + format_sources(documents)
-            )
 
         tools.append(semantic_search)
 
@@ -61,8 +70,14 @@ def build_tools(settings: Settings):
             """Run a read-only SQL query against PostgreSQL. Use only SELECT queries."""
 
             safe_query = validate_sql_query(query, settings)
-            rows = run_read_only_query(settings, safe_query)
-            return json.dumps(rows, ensure_ascii=True, indent=2, default=str)
+            try:
+                rows = run_read_only_query(settings, safe_query)
+                output = json.dumps(rows, ensure_ascii=True, indent=2, default=str)
+                record_tool_call("sql_read_only_query", safe_query, output)
+                return output
+            except Exception as exc:
+                record_tool_call("sql_read_only_query", safe_query, str(exc), status="error")
+                raise
 
         tools.append(sql_read_only_query)
 

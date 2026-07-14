@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import time
 from contextlib import asynccontextmanager
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi import FastAPI, Header, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from .agent import ask_agent
@@ -32,6 +33,7 @@ from .guardrails import (
     WhatsAppAccessBlocked,
     validate_whatsapp_sender_access,
 )
+from .observability import http_request_duration_seconds, http_requests_total, metrics_response
 from .vectorstore import ensure_vector_store_ready
 
 
@@ -73,6 +75,27 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def prometheus_http_metrics(request: Request, call_next):
+    started_at = time.perf_counter()
+    response = await call_next(request)
+    route = request.scope.get("route")
+    path = getattr(route, "path", request.url.path)
+    duration = time.perf_counter() - started_at
+    http_requests_total.labels(
+        service="api",
+        method=request.method,
+        path=path,
+        status=str(response.status_code),
+    ).inc()
+    http_request_duration_seconds.labels(
+        service="api",
+        method=request.method,
+        path=path,
+    ).observe(duration)
+    return response
 
 
 def _settings() -> Settings:
@@ -211,6 +234,12 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/metrics")
+def metrics() -> Response:
+    payload, content_type = metrics_response()
+    return Response(content=payload, media_type=content_type)
+
+
 @app.post("/api/ask")
 def ask(request: AskRequest) -> dict[str, Any]:
     settings = _settings()
@@ -221,12 +250,14 @@ def ask(request: AskRequest) -> dict[str, Any]:
         conversation_id=request.conversation_id,
         user_id=request.user_id,
         store_id=request.store_id,
+        channel="api",
     )
     return {
         "answer": reply.answer,
         "conversation_id": reply.conversation_id,
         "user_id": reply.user_id,
         "store_id": reply.store_id,
+        "tool_calls": reply.tool_calls or [],
     }
 
 
@@ -463,6 +494,7 @@ def evolution_webhook(
             conversation_id=build_whatsapp_conversation_id(str(instance_id), sender_number),
             user_id=f"wa:{sender_number}",
             store_id=settings.evolution_default_store_id,
+            channel="whatsapp",
         )
         reply_text = reply.answer
         conversation_id = reply.conversation_id

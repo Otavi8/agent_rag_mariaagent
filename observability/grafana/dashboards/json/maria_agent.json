@@ -1,0 +1,91 @@
+{
+  "id": null,
+  "uid": "maria-agent",
+  "title": "Maria Agent Observability",
+  "tags": ["maria", "agent", "llm", "web"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Agent Requests",
+      "targets": [
+        {
+          "expr": "sum(maria_agent_requests_total)",
+          "legendFormat": "requests",
+          "refId": "A"
+        }
+      ],
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 5}
+    },
+    {
+      "type": "stat",
+      "title": "Tool Calls",
+      "targets": [
+        {
+          "expr": "sum(maria_agent_tool_calls_total)",
+          "legendFormat": "tool calls",
+          "refId": "B"
+        }
+      ],
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 5}
+    },
+    {
+      "type": "timeseries",
+      "title": "Agent Request Rate",
+      "targets": [
+        {
+          "expr": "sum by (channel, status) (rate(maria_agent_requests_total[5m])) * 60",
+          "legendFormat": "{{channel}} / {{status}}",
+          "refId": "C"
+        }
+      ],
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 5, "w": 12, "h": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Agent Latency p95",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, channel) (rate(maria_agent_request_duration_seconds_bucket[5m])))",
+          "legendFormat": "{{channel}}",
+          "refId": "D"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 12, "y": 5, "w": 12, "h": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP Requests",
+      "targets": [
+        {
+          "expr": "sum by (service, path, status) (rate(maria_http_requests_total[5m])) * 60",
+          "legendFormat": "{{service}} {{path}} {{status}}",
+          "refId": "E"
+        }
+      ],
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 13, "w": 12, "h": 8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Tool Calls by Tool",
+      "targets": [
+        {
+          "expr": "sum by (tool_name, status) (rate(maria_agent_tool_calls_total[5m])) * 60",
+          "legendFormat": "{{tool_name}} / {{status}}",
+          "refId": "F"
+        }
+      ],
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 12, "y": 13, "w": 12, "h": 8}
+    }
+  ]
+}

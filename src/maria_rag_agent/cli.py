@@ -59,6 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Replace existing PostgreSQL data before importing the SQLite content.",
     )
     subparsers.add_parser("reindex", help="Rebuild the local vector database.")
+    subparsers.add_parser("ensure-rules-bucket", help="Create the MinIO rules bucket if missing.")
+    subparsers.add_parser("list-rules", help="List rule files available in MinIO.")
     subparsers.add_parser("show-config", help="Print the loaded configuration.")
 
     ask_parser = subparsers.add_parser("ask", help="Ask a question to the hybrid RAG agent.")
@@ -163,6 +165,31 @@ def handle_reindex() -> None:
     print(json.dumps(stats, ensure_ascii=True, indent=2))
 
 
+def handle_ensure_rules_bucket() -> None:
+    settings = get_settings()
+    from .rules import ensure_rules_bucket
+
+    created = ensure_rules_bucket(settings)
+    print(
+        json.dumps(
+            {
+                "bucket": settings.minio_rules_bucket,
+                "created": created,
+            },
+            ensure_ascii=True,
+            indent=2,
+        )
+    )
+
+
+def handle_list_rules() -> None:
+    settings = get_settings()
+    from .rules import list_rule_objects
+
+    rows = list_rule_objects(settings)
+    print(json.dumps(rows, ensure_ascii=True, indent=2, default=str))
+
+
 def handle_show_config() -> None:
     settings = get_settings()
     print(json.dumps(settings.as_public_dict(), ensure_ascii=True, indent=2, default=str))
@@ -186,6 +213,7 @@ def handle_ask(
         conversation_id=conversation_id,
         user_id=user_id,
         store_id=store_id,
+        channel="cli",
     )
     print(f"[conversation_id={reply.conversation_id}]")
     print(reply.answer)
@@ -344,6 +372,12 @@ def main() -> None:
 
     if args.command == "reindex":
         raise SystemExit(run_user_safe(handle_reindex))
+
+    if args.command == "ensure-rules-bucket":
+        raise SystemExit(run_user_safe(handle_ensure_rules_bucket))
+
+    if args.command == "list-rules":
+        raise SystemExit(run_user_safe(handle_list_rules))
 
     if args.command == "show-config":
         raise SystemExit(run_user_safe(handle_show_config))
