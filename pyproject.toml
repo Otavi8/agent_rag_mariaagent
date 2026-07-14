@@ -46,9 +46,6 @@ maria-rag-web = "maria_rag_agent.web:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/maria_rag_agent"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/maria_rag_agent/templates" = "maria_rag_agent/templates"
-
 [tool.ruff]
 line-length = 100
 target-version = "py311"
