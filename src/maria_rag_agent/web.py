@@ -104,23 +104,26 @@ def chat():
 def api_chat():
     settings = _settings()
     payload: dict[str, Any] = request.get_json(silent=True) or {}
-    reply = ask_agent(
-        question=str(payload.get("question", "")),
-        settings=settings,
-        conversation_id=payload.get("conversation_id"),
-        user_id=str(payload.get("user_id") or settings.web_user_id),
-        store_id=payload.get("store_id"),
-        channel="web",
-    )
-    return jsonify(
-        {
-            "answer": reply.answer,
-            "conversation_id": reply.conversation_id,
-            "user_id": reply.user_id,
-            "store_id": reply.store_id,
-            "tool_calls": reply.tool_calls or [],
-        }
-    )
+    try:
+        reply = ask_agent(
+            question=str(payload.get("question", "")),
+            settings=settings,
+            conversation_id=payload.get("conversation_id"),
+            user_id=str(payload.get("user_id") or settings.web_user_id),
+            store_id=payload.get("store_id"),
+            channel="web",
+        )
+        return jsonify(
+            {
+                "answer": reply.answer,
+                "conversation_id": reply.conversation_id,
+                "user_id": reply.user_id,
+                "store_id": reply.store_id,
+                "tool_calls": reply.tool_calls or [],
+            }
+        )
+    except (GuardrailViolation, ValueError, RuntimeError) as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 @app.get("/metrics")

@@ -138,6 +138,8 @@
 
       .conversation {
         padding: 22px;
+        overflow-y: auto;
+        scroll-behavior: smooth;
       }
 
       .empty-state {
@@ -183,6 +185,61 @@
 
       .bubble.answer {
         background: #ffffff;
+      }
+
+      .bubble.thinking {
+        background: #f8fffd;
+        border-color: #b7e6d7;
+      }
+
+      .bubble.error-answer {
+        background: #fff8f7;
+        border-color: #fecdca;
+        color: var(--danger);
+        font-weight: 700;
+      }
+
+      .thinking-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 800;
+        color: var(--brand-strong);
+      }
+
+      .thinking-copy {
+        margin-top: 8px;
+        color: #344054;
+      }
+
+      .thinking-status {
+        margin-top: 12px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .typing-dots {
+        display: inline-flex;
+        gap: 4px;
+      }
+
+      .typing-dots span {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--brand);
+        animation: typingPulse 1s infinite ease-in-out;
+      }
+
+      .typing-dots span:nth-child(2) {
+        animation-delay: 0.16s;
+      }
+
+      .typing-dots span:nth-child(3) {
+        animation-delay: 0.32s;
       }
 
       .answer-actions {
@@ -276,6 +333,20 @@
 
       .primary-button:hover {
         background: var(--brand-strong);
+      }
+
+      .primary-button:disabled {
+        cursor: wait;
+        opacity: 0.76;
+      }
+
+      .composer.is-busy {
+        background: #eefaf7;
+      }
+
+      .composer.is-busy .question-input,
+      .composer.is-busy .compact-field input {
+        background: #f8fffd;
       }
 
       .secondary-button {
@@ -435,6 +506,20 @@
         font: 13px/1.45 Consolas, Monaco, "Courier New", monospace;
       }
 
+      @keyframes typingPulse {
+        0%,
+        80%,
+        100% {
+          opacity: 0.35;
+          transform: translateY(0);
+        }
+
+        40% {
+          opacity: 1;
+          transform: translateY(-3px);
+        }
+      }
+
       @media (max-width: 980px) {
         .workspace {
           grid-template-columns: 1fr;
@@ -495,7 +580,7 @@
 
       <div class="workspace">
         <section class="chat-surface" aria-label="Chat">
-          <div class="conversation">
+          <div class="conversation" id="conversation" aria-live="polite">
             {% if answer or question %}
               {% if question %}
                 <div class="message">
@@ -532,7 +617,7 @@
             {% endif %}
           </div>
 
-          <form class="composer" method="post" action="/chat">
+          <form class="composer" method="post" action="/chat" data-chat-form>
             <div class="composer-grid">
               <textarea
                 class="question-input"
@@ -556,7 +641,9 @@
                     <input id="store_id" name="store_id" value="{{ store_id }}">
                   </div>
                 </div>
-                <button class="primary-button" type="submit">Enviar</button>
+                <button class="primary-button" type="submit" data-submit-button>
+                  <span data-submit-label>Enviar</span>
+                </button>
               </div>
             </div>
           </form>
@@ -567,15 +654,15 @@
           <div class="meta-list">
             <div class="meta-item">
               <div class="meta-label">Conversa</div>
-              <div class="meta-value">{{ conversation_id or "nova" }}</div>
+              <div class="meta-value" data-meta-conversation>{{ conversation_id or "nova" }}</div>
             </div>
             <div class="meta-item">
               <div class="meta-label">Usuario</div>
-              <div class="meta-value">{{ user_id }}</div>
+              <div class="meta-value" data-meta-user>{{ user_id }}</div>
             </div>
             <div class="meta-item">
               <div class="meta-label">Loja</div>
-              <div class="meta-value">{{ store_id or "padrao" }}</div>
+              <div class="meta-value" data-meta-store>{{ store_id or "padrao" }}</div>
             </div>
           </div>
         </aside>
@@ -589,7 +676,7 @@
           <h2>Consulta do agente</h2>
           <button class="icon-button" type="button" aria-label="Fechar" data-close-drawer>&times;</button>
         </div>
-        <div class="drawer-body">
+        <div class="drawer-body" id="drawerBody">
           {% if tool_calls %}
             {% for call in tool_calls %}
               <div class="tool">
@@ -613,8 +700,25 @@
     <script>
       const drawer = document.querySelector(".drawer");
       const backdrop = document.querySelector(".drawer-backdrop");
-      const openButtons = document.querySelectorAll("[data-open-drawer]");
-      const closeButtons = document.querySelectorAll("[data-close-drawer]");
+      const form = document.querySelector("[data-chat-form]");
+      const conversation = document.querySelector("#conversation");
+      const drawerBody = document.querySelector("#drawerBody");
+      const questionInput = document.querySelector("#question");
+      const conversationInput = document.querySelector("#conversation_id");
+      const userInput = document.querySelector("#user_id");
+      const storeInput = document.querySelector("#store_id");
+      const submitButton = document.querySelector("[data-submit-button]");
+      const submitLabel = document.querySelector("[data-submit-label]");
+      const metaConversation = document.querySelector("[data-meta-conversation]");
+      const metaUser = document.querySelector("[data-meta-user]");
+      const metaStore = document.querySelector("[data-meta-store]");
+      const waitingMessages = [
+        "Estou verificando as bases, as regras operacionais e o historico da conversa.",
+        "Estou cruzando as informacoes para responder com mais seguranca.",
+        "Quase la. Estou organizando a resposta antes de te devolver."
+      ];
+      let loadingInterval = null;
+      let isSubmitting = false;
 
       function openDrawer() {
         drawer.classList.add("open");
@@ -628,8 +732,223 @@
         drawer.setAttribute("aria-hidden", "true");
       }
 
-      openButtons.forEach((button) => button.addEventListener("click", openDrawer));
-      closeButtons.forEach((button) => button.addEventListener("click", closeDrawer));
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;"
+        })[char]);
+      }
+
+      function scrollToBottom() {
+        if (!conversation) {
+          return;
+        }
+        conversation.scrollTop = conversation.scrollHeight;
+      }
+
+      function clearEmptyState() {
+        const emptyState = conversation?.querySelector(".empty-state");
+        if (emptyState) {
+          emptyState.remove();
+        }
+      }
+
+      function appendMessage(label, text, bubbleClass) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "message";
+
+        const labelNode = document.createElement("div");
+        labelNode.className = "message-label";
+        labelNode.textContent = label;
+
+        const bubble = document.createElement("div");
+        bubble.className = `bubble ${bubbleClass}`;
+        bubble.textContent = text;
+
+        wrapper.append(labelNode, bubble);
+        conversation.appendChild(wrapper);
+        scrollToBottom();
+        return wrapper;
+      }
+
+      function appendLoadingMessage() {
+        const wrapper = document.createElement("div");
+        wrapper.className = "message";
+        wrapper.dataset.loadingMessage = "true";
+        wrapper.innerHTML = `
+          <div class="message-label">Maria Agent</div>
+          <div class="bubble thinking">
+            <div class="thinking-header">
+              <span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span>Analisando sua pergunta</span>
+            </div>
+            <div class="thinking-copy" data-waiting-copy>${escapeHtml(waitingMessages[0])}</div>
+            <div class="thinking-status">Pode levar alguns segundos quando preciso consultar SQL, estoque e regras.</div>
+          </div>
+        `;
+        conversation.appendChild(wrapper);
+        scrollToBottom();
+
+        const copy = wrapper.querySelector("[data-waiting-copy]");
+        let index = 0;
+        loadingInterval = window.setInterval(() => {
+          index = (index + 1) % waitingMessages.length;
+          copy.textContent = waitingMessages[index];
+        }, 2800);
+
+        return wrapper;
+      }
+
+      function removeLoadingMessage(wrapper) {
+        if (loadingInterval) {
+          window.clearInterval(loadingInterval);
+          loadingInterval = null;
+        }
+        wrapper?.remove();
+      }
+
+      function setBusy(isBusy) {
+        isSubmitting = isBusy;
+        form?.classList.toggle("is-busy", isBusy);
+        if (submitButton) {
+          submitButton.disabled = isBusy;
+        }
+        if (submitLabel) {
+          submitLabel.textContent = isBusy ? "Consultando..." : "Enviar";
+        }
+        [questionInput, conversationInput, userInput, storeInput].forEach((field) => {
+          if (field) {
+            field.readOnly = isBusy;
+          }
+        });
+      }
+
+      function renderAnswer(answer, toolCalls) {
+        const wrapper = appendMessage("Resposta", answer, "answer");
+        const actions = document.createElement("div");
+        actions.className = "answer-actions";
+        actions.innerHTML = `
+          <button class="secondary-button" type="button" data-open-drawer>
+            Consulta do agente
+          </button>
+          <span class="muted">${toolCalls.length ? `${toolCalls.length} chamada(s) registrada(s)` : "Sem chamadas registradas"}</span>
+        `;
+        wrapper.appendChild(actions);
+      }
+
+      function renderToolCalls(toolCalls) {
+        if (!drawerBody) {
+          return;
+        }
+        if (!toolCalls.length) {
+          drawerBody.innerHTML = '<p class="muted">Nenhuma ferramenta registrada nesta resposta.</p>';
+          return;
+        }
+        drawerBody.innerHTML = toolCalls.map((call) => `
+          <div class="tool">
+            <div class="tool-title">
+              <span>${escapeHtml(call.tool_name)}</span>
+              <span class="pill">${escapeHtml(call.status)}</span>
+            </div>
+            <div class="meta-label" style="margin-top: 12px;">Entrada</div>
+            <pre>${escapeHtml(call.input)}</pre>
+            <div class="meta-label" style="margin-top: 12px;">Saida resumida</div>
+            <pre>${escapeHtml(call.output_preview)}</pre>
+          </div>
+        `).join("");
+      }
+
+      function updateSessionMeta(payload) {
+        const conversationId = payload.conversation_id || conversationInput?.value || "";
+        const userId = payload.user_id || userInput?.value || "";
+        const storeId = payload.store_id || storeInput?.value || "";
+        if (conversationInput) {
+          conversationInput.value = conversationId;
+        }
+        if (userInput) {
+          userInput.value = userId;
+        }
+        if (storeInput) {
+          storeInput.value = storeId;
+        }
+        if (metaConversation) {
+          metaConversation.textContent = conversationId || "nova";
+        }
+        if (metaUser) {
+          metaUser.textContent = userId;
+        }
+        if (metaStore) {
+          metaStore.textContent = storeId || "padrao";
+        }
+      }
+
+      async function submitQuestion(event) {
+        event.preventDefault();
+        if (isSubmitting) {
+          return;
+        }
+
+        const question = questionInput.value.trim();
+        if (!question) {
+          questionInput.focus();
+          return;
+        }
+
+        clearEmptyState();
+        appendMessage("Pergunta", question, "user");
+        const loadingMessage = appendLoadingMessage();
+        setBusy(true);
+
+        try {
+          const response = await fetch("/api/chat", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              question,
+              conversation_id: conversationInput.value.trim() || null,
+              user_id: userInput.value.trim(),
+              store_id: storeInput.value.trim() || null
+            })
+          });
+          const payload = await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw new Error(payload.error || "Nao consegui concluir a consulta agora.");
+          }
+
+          removeLoadingMessage(loadingMessage);
+          renderAnswer(payload.answer || "Nao encontrei uma resposta para essa pergunta.", payload.tool_calls || []);
+          renderToolCalls(payload.tool_calls || []);
+          updateSessionMeta(payload);
+          questionInput.value = "";
+        } catch (error) {
+          removeLoadingMessage(loadingMessage);
+          appendMessage(
+            "Maria Agent",
+            `${error.message || "Nao consegui concluir a consulta agora."} Tente novamente em alguns instantes.`,
+            "error-answer"
+          );
+        } finally {
+          setBusy(false);
+          questionInput.focus();
+        }
+      }
+
+      document.addEventListener("click", (event) => {
+        if (event.target.closest("[data-open-drawer]")) {
+          openDrawer();
+        }
+        if (event.target.closest("[data-close-drawer]")) {
+          closeDrawer();
+        }
+      });
+
+      form?.addEventListener("submit", submitQuestion);
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
           closeDrawer();
