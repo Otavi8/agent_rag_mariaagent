@@ -177,7 +177,7 @@ def answer_stock_inventory_directly(settings: Settings) -> str:
         SELECT
             s.snapshot_date,
             p.sku,
-            p.product_name,
+            p.description AS product_name,
             p.category,
             s.available_qty,
             s.reserved_qty,
