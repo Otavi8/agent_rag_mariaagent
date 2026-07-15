@@ -12,7 +12,7 @@ from langchain.agents.middleware import PIIMiddleware, ToolCallLimitMiddleware
 from langchain_openai import ChatOpenAI
 
 from .config import Settings
-from .database import describe_schema
+from .database import describe_schema, run_read_only_query
 from .guardrails import GuardrailViolation, mask_output, validate_question
 from .memory import (
     ConversationSession,
@@ -24,6 +24,7 @@ from .memory import (
 from .observability import (
     get_langfuse_callbacks,
     get_tool_trace,
+    record_tool_call,
     reset_tool_trace,
     restore_tool_trace,
     timed_agent_request,
@@ -143,6 +144,85 @@ def extract_answer(result: dict[str, Any]) -> str:
     return str(content)
 
 
+def can_answer_stock_inventory_directly(question: str) -> bool:
+    normalized = question.lower()
+    stock_terms = ("estoque", "disponivel", "disponiveis")
+    product_terms = ("produto", "produtos", "sku", "peca", "pecas", "itens")
+    intent_terms = ("temos", "quais", "listar", "lista", "saber")
+    specific_terms = (
+        "critico",
+        "criticos",
+        "ruptura",
+        "reposicao",
+        "reposicoes",
+        "baixo",
+        "abaixo",
+        "risco",
+    )
+    return (
+        any(term in normalized for term in stock_terms)
+        and any(term in normalized for term in product_terms)
+        and any(term in normalized for term in intent_terms)
+        and not any(term in normalized for term in specific_terms)
+    )
+
+
+def answer_stock_inventory_directly(settings: Settings) -> str:
+    limit = max(1, min(settings.sql_max_rows, 50))
+    query = f"""
+        WITH latest_snapshot AS (
+            SELECT MAX(snapshot_date) AS snapshot_date
+            FROM daily_stock_snapshot
+        )
+        SELECT
+            s.snapshot_date,
+            p.sku,
+            p.product_name,
+            p.category,
+            s.available_qty,
+            s.reserved_qty,
+            s.reorder_point_qty,
+            s.stock_status,
+            s.days_of_cover
+        FROM daily_stock_snapshot s
+        JOIN product_catalog p ON p.sku = s.sku
+        WHERE s.snapshot_date = (SELECT snapshot_date FROM latest_snapshot)
+          AND s.available_qty > 0
+        ORDER BY
+            CASE s.stock_status
+                WHEN 'critical' THEN 1
+                WHEN 'attention' THEN 2
+                WHEN 'ok' THEN 3
+                ELSE 4
+            END,
+            s.available_qty ASC,
+            p.product_name ASC
+        LIMIT {limit}
+    """
+    rows = run_read_only_query(settings, query)
+    record_tool_call("sql_read_only_query", query, rows)
+
+    if not rows:
+        return (
+            "Nao encontrei produtos com estoque disponivel no snapshot mais recente. "
+            "(Fonte: daily_stock_snapshot e product_catalog)"
+        )
+
+    snapshot_date = rows[0].get("snapshot_date")
+    lines = [
+        f"Encontrei {len(rows)} produto(s) com estoque disponivel no snapshot de {snapshot_date}:"
+    ]
+    for row in rows:
+        lines.append(
+            "- "
+            f"{row['sku']} - {row['product_name']} ({row['category']}): "
+            f"{row['available_qty']} disponivel, {row['reserved_qty']} reservado, "
+            f"status {row['stock_status']}, cobertura de {row['days_of_cover']} dia(s)."
+        )
+    lines.append("(Fonte: daily_stock_snapshot e product_catalog)")
+    return "\n".join(lines)
+
+
 def ask_agent(
     question: str,
     settings: Settings,
@@ -159,6 +239,31 @@ def ask_agent(
         store_id=store_id,
         title=cleaned_question[:80],
     )
+
+    if can_answer_stock_inventory_directly(cleaned_question):
+        token = reset_tool_trace()
+        try:
+            with timed_agent_request(channel):
+                answer = answer_stock_inventory_directly(settings)
+            tool_calls = get_tool_trace()
+        finally:
+            restore_tool_trace(token)
+
+        masked_answer = mask_output(answer, settings)
+        store_turn(
+            settings=settings,
+            conversation_id=session.conversation_id,
+            user_text=cleaned_question,
+            assistant_text=masked_answer,
+        )
+        return AgentReply(
+            answer=masked_answer,
+            conversation_id=session.conversation_id,
+            user_id=session.user_id,
+            store_id=session.store_id,
+            tool_calls=tool_calls,
+        )
+
     model = build_chat_model(settings)
     agent = build_rag_agent(settings, model=model)
     memory_messages = build_memory_messages(

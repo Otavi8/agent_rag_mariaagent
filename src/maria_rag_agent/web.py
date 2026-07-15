@@ -113,6 +113,8 @@ def api_chat():
             store_id=payload.get("store_id"),
             channel="web",
         )
+        if not reply.answer.strip():
+            return jsonify({"error": "A Maria retornou uma resposta vazia. Tente reformular a pergunta."}), 502
         return jsonify(
             {
                 "answer": reply.answer,

@@ -920,9 +920,12 @@
           if (!response.ok) {
             throw new Error(payload.error || "Nao consegui concluir a consulta agora.");
           }
+          if (!payload.answer || !String(payload.answer).trim()) {
+            throw new Error(payload.error || "A Maria retornou uma resposta vazia. Tente reformular a pergunta.");
+          }
 
           removeLoadingMessage(loadingMessage);
-          renderAnswer(payload.answer || "Nao encontrei uma resposta para essa pergunta.", payload.tool_calls || []);
+          renderAnswer(payload.answer, payload.tool_calls || []);
           renderToolCalls(payload.tool_calls || []);
           updateSessionMeta(payload);
           questionInput.value = "";
