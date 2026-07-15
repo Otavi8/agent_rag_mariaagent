@@ -196,7 +196,7 @@ def answer_stock_inventory_directly(settings: Settings) -> str:
                 ELSE 4
             END,
             s.available_qty ASC,
-            p.product_name ASC
+            p.description ASC
         LIMIT {limit}
     """
     rows = run_read_only_query(settings, query)
@@ -223,6 +223,66 @@ def answer_stock_inventory_directly(settings: Settings) -> str:
     return "\n".join(lines)
 
 
+def can_answer_top_selling_items_directly(question: str) -> bool:
+    normalized = question.lower()
+    subject_terms = ("item", "itens", "produto", "produtos", "sku", "peca", "pecas")
+    ranking_terms = (
+        "mais vendido",
+        "mais vendidos",
+        "vendem mais",
+        "venderam mais",
+        "top vendas",
+        "campeoes de venda",
+        "campeao de venda",
+    )
+    return any(term in normalized for term in subject_terms) and any(
+        term in normalized for term in ranking_terms
+    )
+
+
+def answer_top_selling_items_directly(settings: Settings) -> str:
+    limit = max(1, min(settings.sql_max_rows, 20))
+    query = f"""
+        SELECT
+            (SELECT MIN(sale_date) FROM sales) AS period_start,
+            (SELECT MAX(sale_date) FROM sales) AS period_end,
+            sku,
+            product_description,
+            category,
+            SUM(quantity_sold) AS total_quantity_sold,
+            SUM(net_revenue) AS total_net_revenue,
+            COUNT(*) AS sale_count
+        FROM sales
+        GROUP BY sku, product_description, category
+        ORDER BY total_quantity_sold DESC, total_net_revenue DESC, product_description ASC
+        LIMIT {limit}
+    """
+    rows = run_read_only_query(settings, query)
+    record_tool_call("sql_read_only_query", query, rows)
+
+    if not rows:
+        return "Nao encontrei vendas cadastradas para montar o ranking de itens mais vendidos. (Fonte: sales)"
+
+    period_start = rows[0].get("period_start")
+    period_end = rows[0].get("period_end")
+    lines = [
+        (
+            "Os itens mais vendidos por quantidade, considerando o periodo "
+            f"de {period_start} a {period_end}, sao:"
+        )
+    ]
+    for index, row in enumerate(rows, start=1):
+        total_quantity = row["total_quantity_sold"]
+        total_revenue = row["total_net_revenue"]
+        lines.append(
+            f"{index}. {row['sku']} - {row['product_description']} ({row['category']}): "
+            f"{total_quantity} unidade(s), receita liquida de R$ {total_revenue:,.2f}, "
+            f"{row['sale_count']} venda(s)."
+        )
+    lines.append("(Fonte: tabela sales)")
+    return "\n".join(lines)
+
+
 def ask_agent(
     question: str,
     settings: Settings,
@@ -245,6 +305,30 @@ def ask_agent(
         try:
             with timed_agent_request(channel):
                 answer = answer_stock_inventory_directly(settings)
+            tool_calls = get_tool_trace()
+        finally:
+            restore_tool_trace(token)
+
+        masked_answer = mask_output(answer, settings)
+        store_turn(
+            settings=settings,
+            conversation_id=session.conversation_id,
+            user_text=cleaned_question,
+            assistant_text=masked_answer,
+        )
+        return AgentReply(
+            answer=masked_answer,
+            conversation_id=session.conversation_id,
+            user_id=session.user_id,
+            store_id=session.store_id,
+            tool_calls=tool_calls,
+        )
+
+    if can_answer_top_selling_items_directly(cleaned_question):
+        token = reset_tool_trace()
+        try:
+            with timed_agent_request(channel):
+                answer = answer_top_selling_items_directly(settings)
             tool_calls = get_tool_trace()
         finally:
             restore_tool_trace(token)
