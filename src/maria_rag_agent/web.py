@@ -11,7 +11,6 @@ from .config import Settings, get_settings
 from .database import init_database
 from .guardrails import GuardrailViolation
 from .observability import http_request_duration_seconds, http_requests_total, metrics_response
-from .vectorstore import ensure_vector_store_ready
 
 
 app = Flask(__name__)
@@ -68,7 +67,6 @@ def chat():
     store_id = request.form.get("store_id", "").strip() or None
 
     try:
-        ensure_vector_store_ready(settings)
         reply = ask_agent(
             question=question,
             settings=settings,

@@ -905,57 +905,23 @@
         return data;
       }
 
-      async function submitQuestion(event) {
-        event.preventDefault();
+      function submitQuestion(event) {
         if (isSubmitting) {
+          event.preventDefault();
           return;
         }
 
         const question = questionInput.value.trim();
         if (!question) {
+          event.preventDefault();
           questionInput.focus();
           return;
         }
 
         clearEmptyState();
         appendMessage("Pergunta", question, "user");
-        const loadingMessage = appendLoadingMessage();
+        appendLoadingMessage();
         setBusy(true);
-
-        try {
-          let payload;
-          try {
-            payload = await requestChat({
-              question,
-              conversation_id: conversationInput.value.trim() || null,
-              user_id: userInput.value.trim(),
-              store_id: storeInput.value.trim() || null
-            });
-          } catch (firstError) {
-            payload = await requestChat({
-              question,
-              conversation_id: null,
-              user_id: userInput.value.trim() || "web-user",
-              store_id: null
-            });
-          }
-
-          removeLoadingMessage(loadingMessage);
-          renderAnswer(payload.answer, payload.tool_calls || []);
-          renderToolCalls(payload.tool_calls || []);
-          updateSessionMeta(payload);
-          questionInput.value = "";
-        } catch (error) {
-          removeLoadingMessage(loadingMessage);
-          appendMessage(
-            "Maria Agent",
-            `${error.message || "Nao consegui concluir a consulta agora."} Tente novamente em alguns instantes.`,
-            "error-answer"
-          );
-        } finally {
-          setBusy(false);
-          questionInput.focus();
-        }
       }
 
       document.addEventListener("click", (event) => {
