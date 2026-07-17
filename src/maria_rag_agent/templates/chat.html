@@ -885,6 +885,26 @@
         }
       }
 
+      async function requestChat(payload) {
+        const response = await fetch("/api/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(data.error || "Nao consegui concluir a consulta agora.");
+        }
+        if (!data.answer || !String(data.answer).trim()) {
+          throw new Error(data.error || "A Maria retornou uma resposta vazia. Vou tentar novamente sem o historico da conversa.");
+        }
+
+        return data;
+      }
+
       async function submitQuestion(event) {
         event.preventDefault();
         if (isSubmitting) {
@@ -903,25 +923,21 @@
         setBusy(true);
 
         try {
-          const response = await fetch("/api/chat", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
+          let payload;
+          try {
+            payload = await requestChat({
               question,
               conversation_id: conversationInput.value.trim() || null,
               user_id: userInput.value.trim(),
               store_id: storeInput.value.trim() || null
-            })
-          });
-          const payload = await response.json().catch(() => ({}));
-
-          if (!response.ok) {
-            throw new Error(payload.error || "Nao consegui concluir a consulta agora.");
-          }
-          if (!payload.answer || !String(payload.answer).trim()) {
-            throw new Error(payload.error || "A Maria retornou uma resposta vazia. Tente reformular a pergunta.");
+            });
+          } catch (firstError) {
+            payload = await requestChat({
+              question,
+              conversation_id: null,
+              user_id: userInput.value.trim() || "web-user",
+              store_id: null
+            });
           }
 
           removeLoadingMessage(loadingMessage);
