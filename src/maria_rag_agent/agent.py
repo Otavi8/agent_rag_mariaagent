@@ -126,9 +126,42 @@ def extract_answer(result: dict[str, Any]) -> str:
     if not messages:
         return "No response was produced by the agent."
 
-    final_message = messages[-1]
-    content = getattr(final_message, "content", final_message)
+    for message in reversed(messages):
+        if not _is_assistant_message(message):
+            continue
+        text = _message_content_to_text(_message_content(message)).strip()
+        if text:
+            return text
 
+    return ""
+
+
+def _is_assistant_message(message: Any) -> bool:
+    message_type = getattr(message, "type", None)
+    if message_type in {"ai", "assistant"}:
+        return True
+
+    role = getattr(message, "role", None)
+    if role == "assistant":
+        return True
+
+    if isinstance(message, dict):
+        return message.get("role") == "assistant" or message.get("type") in {"ai", "assistant"}
+
+    return message.__class__.__name__.lower() in {
+        "aimessage",
+        "aimessagechunk",
+        "assistantmessage",
+    }
+
+
+def _message_content(message: Any) -> Any:
+    if isinstance(message, dict):
+        return message.get("content", "")
+    return getattr(message, "content", message)
+
+
+def _message_content_to_text(content: Any) -> str:
     if isinstance(content, str):
         return content
 
