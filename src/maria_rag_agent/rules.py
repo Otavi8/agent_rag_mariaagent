@@ -129,3 +129,16 @@ def list_rule_objects(settings: Settings) -> list[dict[str, object]]:
         for item in objects
         if item.object_name and not item.object_name.endswith("/")
     ]
+
+
+def read_rule_object_text(settings: Settings, object_name: str) -> str:
+    allowed_objects = {
+        str(item["object_name"])
+        for item in list_rule_objects(settings)
+        if item.get("indexed_extension")
+    }
+    if object_name not in allowed_objects:
+        raise ValueError("Objeto de regra nao encontrado ou nao indexavel.")
+
+    client = build_minio_client(settings)
+    return _read_object_text(client, settings.minio_rules_bucket, object_name)

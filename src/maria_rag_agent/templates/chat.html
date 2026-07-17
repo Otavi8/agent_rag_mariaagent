@@ -104,6 +104,28 @@
         white-space: nowrap;
       }
 
+      .topbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .nav-link {
+        min-height: 34px;
+        display: inline-flex;
+        align-items: center;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: #fff;
+        color: var(--text);
+        padding: 0 12px;
+        font-size: 13px;
+        font-weight: 800;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+
       .status-dot {
         width: 8px;
         height: 8px;
@@ -574,7 +596,10 @@
               <div class="brand-meta">Operacao de autopecas</div>
             </div>
           </div>
-          <div class="status"><span class="status-dot"></span>Operacional</div>
+          <div class="topbar-actions">
+            <a class="nav-link" href="/rules">Bucket de regras</a>
+            <div class="status"><span class="status-dot"></span>Operacional</div>
+          </div>
         </div>
       </header>
 

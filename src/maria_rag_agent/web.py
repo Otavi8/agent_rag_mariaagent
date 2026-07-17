@@ -11,6 +11,7 @@ from .config import Settings, get_settings
 from .database import init_database
 from .guardrails import GuardrailViolation
 from .observability import http_request_duration_seconds, http_requests_total, metrics_response
+from .rules import list_rule_objects, read_rule_object_text
 
 
 app = Flask(__name__)
@@ -55,6 +56,36 @@ def index():
         store_id="",
         tool_calls=[],
         error=None,
+    )
+
+
+@app.get("/rules")
+def rules_view():
+    settings = _settings()
+    selected_object = request.args.get("object", "").strip()
+    error = None
+    objects: list[dict[str, object]] = []
+    content = ""
+
+    try:
+        objects = list_rule_objects(settings)
+        indexed_objects = [item for item in objects if item.get("indexed_extension")]
+        if not selected_object and indexed_objects:
+            selected_object = str(indexed_objects[0]["object_name"])
+        if selected_object:
+            content = read_rule_object_text(settings, selected_object)
+    except Exception as exc:
+        error = str(exc)
+
+    return render_template(
+        "rules.html",
+        bucket=settings.minio_rules_bucket,
+        prefix=settings.minio_rules_prefix,
+        endpoint=settings.minio_endpoint,
+        objects=objects,
+        selected_object=selected_object,
+        content=content,
+        error=error,
     )
 
 
