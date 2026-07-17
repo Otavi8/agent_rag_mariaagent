@@ -180,7 +180,7 @@ docker compose exec app python -m maria_rag_agent.cli ensure-rules-bucket
 docker compose exec app python -m maria_rag_agent.cli reindex
 ```
 
-O `seed-db` recria os dados demonstrativos de `14/04/2026` ate `14/07/2026`, incluindo vendas, estoque, compras, entregas, pedidos de clientes, metas, precos e equipe. O `ensure-rules-bucket` cria o bucket de regras no MinIO. O `reindex` recria a colecao no Qdrant com base nos dados do PostgreSQL e nas regras `.md`/`.txt` encontradas no MinIO.
+O `seed-db` recria os dados demonstrativos de `17/04/2026` ate `17/07/2026`, incluindo vendas, estoque, compras, entregas, pedidos de clientes, metas, precos e equipe. O `ensure-rules-bucket` cria o bucket de regras no MinIO. O `reindex` recria a colecao no Qdrant com base nos dados do PostgreSQL e nas regras `.md`/`.txt` encontradas no MinIO.
 
 Se a VPS ja tiver uma versao antiga da base, rode novamente:
 

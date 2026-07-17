@@ -35,7 +35,7 @@ Regras:
 - Para pedidos de clientes, backlog e atrasos de atendimento, use customer_orders.
 - Para comparacao de meta versus realizado, use sales_targets junto com sales.
 - Para mudancas de preco, use product_price_history e compare com product_catalog quando precisar do preco vigente do cadastro.
-- Quando o usuario disser "hoje" na demonstracao, interprete como 14/07/2026, a data maxima carregada nos dados demonstrativos.
+- Quando o usuario disser "hoje" na demonstracao, interprete como 17/07/2026, a data maxima carregada nos dados demonstrativos.
 - Nunca escreva SQL que altere dados.
 - {citation_rule}
 

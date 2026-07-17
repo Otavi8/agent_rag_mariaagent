@@ -32,7 +32,7 @@ Os dados operacionais ficam no `PostgreSQL`, as regras ficam no `MinIO`, tudo e 
 ## Casos de uso
 
 - responder perguntas sobre vendas, estoque e cobertura de equipe
-- responder perguntas de demo considerando dados de 14/04/2026 ate 14/07/2026
+- responder perguntas de demo considerando dados de 17/04/2026 ate 17/07/2026
 - analisar compras, entregas de fornecedores, pedidos de clientes, metas e alteracoes de preco
 - aplicar regras operacionais cadastradas por usuarios no MinIO
 - manter contexto entre conversas sem reenviar todo o historico
@@ -41,7 +41,7 @@ Os dados operacionais ficam no `PostgreSQL`, as regras ficam no `MinIO`, tudo e 
 
 ## Dados demonstrativos
 
-O seed atual carrega uma base de autopecas com dados entre `14/04/2026` e `14/07/2026`. Para a demonstracao, perguntas como "hoje" devem considerar `14/07/2026`.
+O seed atual carrega uma base de autopecas com dados entre `17/04/2026` e `17/07/2026`. Para a demonstracao, perguntas como "hoje" devem considerar `17/07/2026`.
 
 Tabelas de negocio indexadas:
 
@@ -70,7 +70,7 @@ Exemplo de arquivo:
 
 - Produto abaixo do ponto de reposicao deve ser tratado como critico.
 - Pedido de cliente atrasado tem prioridade sobre compra planejada.
-- Para a demonstracao, considerar 14/07/2026 como data atual.
+- Para a demonstracao, considerar 17/07/2026 como data atual.
 ```
 
 Comandos uteis:
@@ -353,6 +353,10 @@ RAG:
 - `MINIO_SECRET_KEY`
 - `MINIO_RULES_BUCKET`
 - `MINIO_RULES_PREFIX`
+- `MINIO_API_PORT`
+- `MINIO_CONSOLE_PORT`
+- `MINIO_SERVER_URL`
+- `MINIO_BROWSER_REDIRECT_URL`
 - `SOURCE_TABLES`
 - `CHUNK_SIZE`
 - `CHUNK_OVERLAP`
@@ -422,6 +426,6 @@ Veja os defaults em [.env.example](.env.example).
 - o banco principal nao e mais `SQLite`; agora e `PostgreSQL`
 - o indice vetorial agora fica no `Qdrant`; rode `reindex` apos migrar dados
 - regras em `.md` e `.txt` no MinIO entram no Qdrant pelo mesmo `reindex`
-- os dados demonstrativos terminam em `14/07/2026`; rode `seed-db` antes do `reindex` para recarregar esse periodo
+- os dados demonstrativos terminam em `17/07/2026`; rode `seed-db` antes do `reindex` para recarregar esse periodo
 - a chave real da OpenAI nunca deve ser commitada
 - antes de publicar, revise `.env`, dominios, credenciais e hashes de `basic auth`

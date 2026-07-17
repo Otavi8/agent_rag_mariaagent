@@ -407,8 +407,8 @@ def seed_database(settings: Settings) -> dict[str, int]:
                 RESTART IDENTITY CASCADE
                 """
             )
-            demo_start_date = date(2026, 4, 14)
-            demo_end_date = date(2026, 7, 14)
+            demo_start_date = date(2026, 4, 17)
+            demo_end_date = date(2026, 7, 17)
             demo_days = (demo_end_date - demo_start_date).days + 1
 
             products = [
@@ -864,7 +864,7 @@ def seed_database(settings: Settings) -> dict[str, int]:
                 sales_targets,
             )
 
-            price_months = [date(2026, 4, 14), date(2026, 5, 14), date(2026, 6, 14), demo_end_date]
+            price_months = [date(2026, 4, 17), date(2026, 5, 17), date(2026, 6, 17), demo_end_date]
             product_price_history = []
             for product_index, product in enumerate(products):
                 base_price = float(product[7])

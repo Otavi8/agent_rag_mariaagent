@@ -69,8 +69,8 @@ O sistema deve armazenar os dados operacionais em `PostgreSQL`.
 
 Base demonstrativa atual:
 
-- periodo de dados: `14/04/2026` ate `14/07/2026`
-- data de referencia para perguntas de demo como "hoje": `14/07/2026`
+- periodo de dados: `17/04/2026` ate `17/07/2026`
+- data de referencia para perguntas de demo como "hoje": `17/07/2026`
 - tabelas de negocio: `product_catalog`, `sales`, `employees`, `absenteeism_events`, `purchase_orders`, `inventory_movements`, `daily_stock_snapshot`, `customer_orders`, `sales_targets`, `supplier_deliveries` e `product_price_history`
 
 ### RF-02. Indexacao vetorial
@@ -347,7 +347,7 @@ docker compose exec app python -m maria_rag_agent.cli ensure-rules-bucket
 docker compose exec app python -m maria_rag_agent.cli reindex
 ```
 
-O `seed-db` carrega a base demonstrativa de 3 meses ate `14/07/2026`. O `ensure-rules-bucket` prepara o bucket de regras no MinIO. O `reindex` deve ser executado depois para enviar as tabelas configuradas em `SOURCE_TABLES` e os arquivos de regra para o Qdrant.
+O `seed-db` carrega a base demonstrativa de 3 meses ate `17/07/2026`. O `ensure-rules-bucket` prepara o bucket de regras no MinIO. O `reindex` deve ser executado depois para enviar as tabelas configuradas em `SOURCE_TABLES` e os arquivos de regra para o Qdrant.
 
 Se vier de `SQLite`:
 
